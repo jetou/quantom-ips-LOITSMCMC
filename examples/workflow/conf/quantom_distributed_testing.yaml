@@ -1,0 +1,29 @@
+defaults:
+  - opt: distGAN
+  - model@opt.generator: Conv2DTGenerator
+  - model@opt.discriminator: MLPDiscriminator2D
+  - gradient_transport@opt.gradient_transport: Base
+  - dataloader: numpy
+  - algorithm@algorithms.data_mover: PyTorchDataMover
+  - algorithm@algorithms.logger: LossTracker
+  - env@algorithms.env: QuantomEnv
+  - env/theory@algorithms.env.theory: IdentityTheory
+  - env/sampler@algorithms.env.sampler: LOITS2D
+  - _self_
+
+device: null
+autodetect_device: false
+dtype: float32
+output_dir: ${hydra:runtime.output_dir}
+dataloader:
+  dataset:
+    path: /Users/daniellersch/Desktop/SciDAC/sample_data/events_2d_proxy_app_v0.npy
+  batch_size: 1000
+opt:
+  generator:
+    mlp_in: 10
+  progress_bar: true
+  limit_batches: 10
+envs:
+  theory:
+    average: true

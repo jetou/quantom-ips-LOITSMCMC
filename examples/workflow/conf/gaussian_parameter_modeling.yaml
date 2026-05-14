@@ -1,0 +1,31 @@
+defaults:
+  - opt: Geomloss
+  - dataloader: basic
+  - dataloader/dataset: infinite_gaussian
+  - algorithm@algorithms.data_mover: PyTorchDataMover
+  - algorithm@algorithms.logger: LossTracker
+  - env@algorithms.env: QuantomEnv
+  - env/sampler@algorithms.env.sampler: MVGS
+  - env/theory@algorithms.env.theory: IdentityTheory
+  - algorithm@algorithms.model_checkpointing: ModelCheckpointing
+  - _self_
+  - override model@opt.generator: Parameter
+
+device: null
+dtype: float32
+output_dir: ${hydra:runtime.output_dir}
+autodetect_device: true
+opt:
+  generator:
+    output_dim: 4
+  #   input_dim: 10
+  progress_bar: true
+  gen_lr: 5e-3
+algorithms:
+  env:
+    theory:
+      average: false
+dataloader:
+  batch_size: 10
+  dataset:
+    num_batches: 10

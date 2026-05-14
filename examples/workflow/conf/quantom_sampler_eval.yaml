@@ -1,0 +1,36 @@
+defaults:
+  - opt: GAN
+  - model@opt.generator: Conv2DTGenerator
+  - model@opt.discriminator: MLPDiscriminator2D
+  - dataloader: numpy
+  - env/theory@eval.theory: IdentityTheory
+  - env/sampler@eval.samplers.LOITS2D: LOITS2D
+  - env/sampler@eval.samplers.MCMCLOITS2D: MCMCLOITS2D
+  - _self_
+
+checkpoint: null
+device: null
+autodetect_device: true
+dtype: float32
+output_dir: ${hydra:runtime.output_dir}
+
+dataloader:
+  dataset:
+    path: /work/data_science/quantom/data/events_2d_proxy_app_v0.npy
+  batch_size: 1000
+  shuffle: false
+
+eval:
+  n_batches: 1
+  n_events: null
+  histogram_bins: 100
+  samplers:
+    LOITS2D:
+      average: true
+      use_threading: false
+      vmap_randomness: different
+      static_weight_tensor: false
+      n_interpolations_x: 10
+      n_interpolations_y: 10
+    MCMCLOITS2D:
+      n_marginal_points: 32

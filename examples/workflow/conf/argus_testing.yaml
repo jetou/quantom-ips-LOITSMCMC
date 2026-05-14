@@ -1,0 +1,21 @@
+defaults:
+  - opt: GAN
+  - model@opt.generator: MLP
+  - model@opt.discriminator: MLPDiscriminator1D
+  - dataloader: numpy
+  - algorithm@algorithms.data_mover: PyTorchDataMover
+  - algorithm@algorithms.logger: LossTracker
+  - _self_
+  
+device: null                     
+dtype: float32                 
+output_dir: ${hydra:runtime.output_dir}
+autodetect_device: true
+dataloader:
+  dataset:
+    path: argus.npy
+  batch_size: 1000
+opt:
+  generator:
+    input_dim: 10
+  progress_bar: true

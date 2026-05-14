@@ -1,0 +1,22 @@
+defaults:
+  - opt: GAN
+  - model@opt.generator: Conv2DTGenerator
+  - model@opt.discriminator: MLPDiscriminator2D
+  - dataloader: numpy
+  - algorithm@algorithms.data_mover: PyTorchDataMover
+  - algorithm@algorithms.logger: LossTracker
+  - env@algorithms.env: QuantomEnv
+  - env/theory@algorithms.env.theory: IdentityTheory
+  - env/sampler@algorithms.env.sampler: LOITS2D
+  - _self_
+
+device: null                    
+autodetect_device: true
+dtype: float32
+output_dir: ${hydra:runtime.output_dir}
+dataloader:
+  dataset:
+    path: /work/data_science/quantom/data/events_2d_proxy_app_v0.npy
+  batch_size: 1000
+opt:
+  progress_bar: true
