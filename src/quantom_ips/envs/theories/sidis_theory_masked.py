@@ -3,12 +3,13 @@ import torch
 import numpy as np
 from scipy.special import jv, jn_zeros, yv
 from . import params, alphaS_
+from .lhapdf_setup import configure_lhapdf_paths
 
 #--load FFs using LHAPDF
 import lhapdf
 
 #--set environment
-os.environ["LHAPDF_DATA_PATH"] = '/w/jam-sciwork24/ccocuzza/lhapdf/python3/sets'
+configure_lhapdf_paths(lhapdf)
 lhapdf_set_proton_PDF = 'JAM20-SIDIS_PDF_proton_nlo'
 lhapdf_set_pion_FF = 'JAM20-SIDIS_FF_pion_nlo'
 PDF_proton = lhapdf.mkPDF(lhapdf_set_proton_PDF,0)
@@ -932,7 +933,6 @@ class Tensor_FT:
         F_UU      = torch.trapz(FUU_trapz,self.bt_1,dim=-1)
         
         return F_UU
-
 
 
 

@@ -16,6 +16,21 @@ if [ -n "${CONDA_PREFIX:-}" ]; then
   export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
 fi
 
+if [ -z "${LHAPDF_DATA_PATH:-}" ]; then
+  for p in \
+    "$CONDA_PREFIX/share/LHAPDF" \
+    "/home/jxu004/miniconda3/envs/tmd/share/LHAPDF" \
+    "/home/jxu004/miniconda3/envs/pyhigh2/share/LHAPDF" \
+    "/w/jam-sciwork24/ccocuzza/lhapdf/python3/sets"; do
+    if [ -d "$p/JAM20-SIDIS_PDF_proton_nlo" ] && [ -d "$p/JAM20-SIDIS_FF_pion_nlo" ]; then
+      export LHAPDF_DATA_PATH="$p"
+      break
+    fi
+  done
+fi
+
+echo "LHAPDF_DATA_PATH=${LHAPDF_DATA_PATH:-unset}"
+
 export PYTHONPATH="$repoDir/src:${PYTHONPATH:-}"
 
 KIN_YAML="${KIN_YAML:-$repoDir/examples/sidis_11GeV.yaml}"
