@@ -21,16 +21,15 @@ from quantom_ips.utils.torch_nn_registry import get_dtype
 logging.getLogger("matplotlib.font_manager").setLevel(logging.INFO)
 logger = logging.getLogger("tmd_workflow")
 
-_orig_check_help = argparse.ArgumentParser._check_help
+if hasattr(argparse.ArgumentParser, "_check_help"):
+    _orig_check_help = argparse.ArgumentParser._check_help
 
+    def _check_help_compat(self, action):
+        if action.help is not None and not isinstance(action.help, str):
+            return
+        return _orig_check_help(self, action)
 
-def _check_help_compat(self, action):
-    if action.help is not None and not isinstance(action.help, str):
-        return
-    return _orig_check_help(self, action)
-
-
-argparse.ArgumentParser._check_help = _check_help_compat
+    argparse.ArgumentParser._check_help = _check_help_compat
 
 
 defaults = [
