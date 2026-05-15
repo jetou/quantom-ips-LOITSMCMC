@@ -3,7 +3,7 @@ import torch
 import numpy as np
 from scipy.special import jv, jn_zeros, yv
 from . import params, alphaS_
-from .lhapdf_setup import configure_lhapdf_paths
+from .lhapdf_setup import configure_lhapdf_paths, get_theory_grids_dir
 
 #--load FFs using LHAPDF
 import lhapdf
@@ -226,7 +226,7 @@ class SIDIS:
 
     def build_bTqT_grid(self):
        
-        checkdir('grids') 
+        grid_dir = get_theory_grids_dir()
         filename = 'bTqT_grid_bTres=%d_qTres=%d_ninterp=%d.pt'%(self.nbt,self.nqt,self.n_interp)
         # === Quadrature weights for bT ===
         dbT = torch.diff(self.bt_eval)
@@ -237,7 +237,6 @@ class SIDIS:
         w_bT[-1] = dbT[-1] / 2
 
       
-        grid_dir = '/w/jam-sciwork24/kmbraga/SciDAC/Quantom/quantom-ips/examples/submission_scripts/grids'
         GRIDS = os.listdir(grid_dir)
         if filename in GRIDS:
             self.bTqT_grid = torch.load('%s/%s'%(grid_dir,filename),weights_only=True)#.requires_grad_(True)
@@ -255,7 +254,7 @@ class SIDIS:
             print('Time taking to generate bT -> qT grid: %3.2f seconds'%(t1-t0))
             print('Saving grid to grids/%s'%filename)
             torch.save(grid,'%s/%s'%(grid_dir,filename))
-            self.bTqT_grid = torch.load('grids/%s'%filename,weights_only=True)#.requires_grad_(True)
+            self.bTqT_grid = torch.load('%s/%s'%(grid_dir,filename),weights_only=True)#.requires_grad_(True)
 
     def R_function(self,bt,var, center, width, steepness):
         bt = bt.to(var.device)
@@ -841,7 +840,6 @@ class Tensor_FT:
         F_UU      = torch.trapz(FUU_trapz,self.bt_1,dim=-1)
         
         return F_UU
-
 
 
 

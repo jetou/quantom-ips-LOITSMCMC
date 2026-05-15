@@ -32,6 +32,8 @@ fi
 echo "LHAPDF_DATA_PATH=${LHAPDF_DATA_PATH:-unset}"
 
 export PYTHONPATH="$repoDir/src:${PYTHONPATH:-}"
+export QUANTOM_IPS_GRIDS_DIR="${QUANTOM_IPS_GRIDS_DIR:-$repoDir/examples/submission_scripts/grids}"
+mkdir -p "$QUANTOM_IPS_GRIDS_DIR"
 
 KIN_YAML="${KIN_YAML:-$repoDir/examples/sidis_11GeV.yaml}"
 KIN_OVERRIDES="$(python "$repoDir/examples/resolve_kinematics.py" --yaml "$KIN_YAML" 2>/dev/null || true)"

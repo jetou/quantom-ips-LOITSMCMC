@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 
 def configure_lhapdf_paths(lhapdf):
@@ -42,3 +43,15 @@ def configure_lhapdf_paths(lhapdf):
             lhapdf.pathsPrepend(path)
 
     return existing
+
+
+def get_theory_grids_dir():
+    env_path = os.environ.get("QUANTOM_IPS_GRIDS_DIR")
+    if env_path:
+        path = Path(env_path)
+    else:
+        repo_root = Path(__file__).resolve().parents[4]
+        path = repo_root / "examples" / "submission_scripts" / "grids"
+
+    path.mkdir(parents=True, exist_ok=True)
+    return str(path)
