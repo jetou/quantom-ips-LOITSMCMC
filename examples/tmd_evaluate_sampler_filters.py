@@ -128,6 +128,79 @@ def plot_marginals(real_events, samples_by_name, bins, outpath):
     plt.close(fig)
 
 
+def _hist_density(events, bin_edges):
+    hist, _ = np.histogram(events, bins=bin_edges, density=True)
+    return hist.astype(np.float64)
+
+
+def plot_event_distributions_with_uncertainty(real_events, sample_reps_by_name, bins, outpath):
+    n_dims = len(bins)
+    n_cols = 3
+    n_rows = int(np.ceil(n_dims / n_cols))
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(5.0 * n_cols, 3.9 * n_rows),
+        constrained_layout=True,
+    )
+    axes = np.asarray(axes).reshape(-1)
+    colors = {"ITS": "tab:orange", "MCMCLOITSND": "tab:green"}
+
+    for dim in range(n_dims):
+        ax = axes[dim]
+        edges = bins[dim]
+        centers = 0.5 * (edges[1:] + edges[:-1])
+
+        real_hist = _hist_density(real_events[:, dim], edges)
+        ax.step(centers, real_hist, where="mid", label="Real", linewidth=2.2, color="tab:blue")
+
+        for name, reps in sample_reps_by_name.items():
+            rep_hists = np.stack([_hist_density(rep[:, dim], edges) for rep in reps], axis=0)
+            mean = rep_hists.mean(axis=0)
+            std = rep_hists.std(axis=0)
+            color = colors.get(name)
+            ax.step(centers, mean, where="mid", label=f"{name} mean", linewidth=2.0, color=color)
+            ax.errorbar(
+                centers,
+                mean,
+                yerr=std,
+                fmt="none",
+                color=color,
+                alpha=0.65,
+                capsize=2.0,
+                linewidth=1.0,
+            )
+
+        ax.set_xlabel(axis_label(AXIS_NAMES[dim]))
+        ax.set_ylabel("density")
+        ax.grid(True, alpha=0.25)
+        if AXIS_NAMES[dim] == "x":
+            ax.set_xscale("log")
+
+    for ax in axes[n_dims:]:
+        ax.axis("off")
+
+    handles, labels = axes[0].get_legend_handles_labels()
+    if handles:
+        axes[-1].legend(handles, labels, loc="center", frameon=True)
+        if axes[-1].has_data():
+            axes[-1].legend(loc="best", frameon=True)
+
+    fig.suptitle("Event Distributions with Statistical Uncertainty (Real vs ITS vs MCMCLOITSND)")
+    fig.savefig(outpath, dpi=170)
+    plt.close(fig)
+
+
+def axis_label(name):
+    if name == "Q2":
+        return r"$Q^2$ [GeV$^2$]"
+    if name == "qT":
+        return r"$q_T$ [GeV]"
+    if name == "phi":
+        return r"$\phi$"
+    return name
+
+
 def plot_pair_projection(real_events, samples_by_name, bins, outpath, dims=(0, 3)):
     names = ["true"] + list(samples_by_name.keys())
     events_list = [real_events] + list(samples_by_name.values())
@@ -301,6 +374,12 @@ def main():
     parser.add_argument("--data", required=True, help="Real SIDIS events .npy file")
     parser.add_argument("--n-events", type=int, default=10000)
     parser.add_argument("--n-samples", type=int, default=1, help="Generator batch size for evaluation")
+    parser.add_argument(
+        "--n-repeats",
+        type=int,
+        default=10,
+        help="Repeat each sampler this many times to estimate histogram uncertainty",
+    )
     parser.add_argument("--outdir", default=None)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--dtype", default="float32")
@@ -370,6 +449,7 @@ def main():
 
         samplers = {"ITS": make_sampler("ITS"), "MCMCLOITSND": make_sampler("MCMCLOITSND")}
         samples_by_name = {}
+        sample_reps_by_name = {}
         metrics = {}
         bins = [axis.detach().cpu().numpy().astype(np.float64) for axis in grid_axes]
         real_events = load_events(args.data, event_dim=len(bins), n_events=args.n_events, seed=args.seed)
@@ -378,15 +458,30 @@ def main():
 
         np.save(outdir / "real_events.npy", real_events)
         for name, sampler in samplers.items():
-            events = sampler.forward(density, grid_axes, args.n_events)
-            events = events.reshape(-1, events.shape[-1]).detach().cpu().numpy()
-            events = events[: args.n_events].astype(np.float64)
+            reps = []
+            acceptance_rates = []
+            for repeat in range(max(1, int(args.n_repeats))):
+                torch.manual_seed(args.seed + 1009 * repeat + 17 * (name == "MCMCLOITSND"))
+                events = sampler.forward(density, grid_axes, args.n_events)
+                events = events.reshape(-1, events.shape[-1]).detach().cpu().numpy()
+                events = events[: args.n_events].astype(np.float64)
+                reps.append(events)
+                rate = getattr(sampler, "last_acceptance_rate", None)
+                if rate is not None:
+                    acceptance_rates.append(float(rate))
+
+            events = reps[-1]
             np.save(outdir / f"{name.lower()}_events.npy", events)
+            np.save(outdir / f"{name.lower()}_events_reps.npy", np.stack(reps, axis=0))
             samples_by_name[name] = events
+            sample_reps_by_name[name] = reps
 
             sample_hist = histogram_probability(events, bins)
             metrics[name] = metric_block(real_hist, sample_hist)
-            metrics[name]["acceptance_rate"] = getattr(sampler, "last_acceptance_rate", None)
+            metrics[name]["acceptance_rate"] = (
+                float(np.mean(acceptance_rates)) if acceptance_rates else None
+            )
+            metrics[name]["n_repeats"] = int(max(1, args.n_repeats))
 
         projection_metrics = {}
         for dims, label in projections:
@@ -400,9 +495,9 @@ def main():
                     bins[dims[0]],
                     bins[dims[1]],
                 )
-                projection_metrics[label][name]["acceptance_rate"] = getattr(
-                    samplers[name], "last_acceptance_rate", None
-                )
+                projection_metrics[label][name]["acceptance_rate"] = metrics[name][
+                    "acceptance_rate"
+                ]
         metrics["projections"] = projection_metrics
 
     with (outdir / "sampler_filter_metrics.json").open("w", encoding="utf-8") as f:
@@ -417,6 +512,12 @@ def main():
         )
 
     plot_marginals(real_events, samples_by_name, bins, outdir / "sampler_marginals.png")
+    plot_event_distributions_with_uncertainty(
+        real_events,
+        sample_reps_by_name,
+        bins,
+        outdir / "sampler_event_distributions_uncertainty.png",
+    )
     for dims, label in projections:
         plot_pair_projection(
             real_events,

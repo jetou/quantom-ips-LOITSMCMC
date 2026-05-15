@@ -36,6 +36,7 @@ python examples\tmd_evaluate_sampler_filters.py ^
   --rundir D:\path\to\run_dir ^
   --data D:\path\to\sidis_dataset.npy ^
   --n-events 10000 ^
+  --n-repeats 10 ^
   --outdir D:\path\to\eval_dir ^
   --projections x,qT x,Q2 z,qT qT,phi
 ```
@@ -45,9 +46,12 @@ The evaluation script saves:
 - `sampler_filter_metrics.json`
 - `real_events.npy`
 - `its_events.npy`
+- `its_events_reps.npy`
 - `mcmcloitsnd_events.npy`
+- `mcmcloitsnd_events_reps.npy`
 - `tmd_true_vs_model_last_epoch.png`
 - `sampler_marginals.png`
+- `sampler_event_distributions_uncertainty.png`
 - `sampler_projection_x_qT_true_its_mcmc.png`
 - `sampler_projection_x_qT_differences.png`
 - matching `true_its_mcmc` and `differences` plots for each requested projection
