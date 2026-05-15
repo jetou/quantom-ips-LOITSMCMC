@@ -36,7 +36,8 @@ python examples\tmd_evaluate_sampler_filters.py ^
   --rundir D:\path\to\run_dir ^
   --data D:\path\to\sidis_dataset.npy ^
   --n-events 10000 ^
-  --outdir D:\path\to\eval_dir
+  --outdir D:\path\to\eval_dir ^
+  --projections x,qT x,Q2 z,qT qT,phi
 ```
 
 The evaluation script saves:
@@ -45,5 +46,14 @@ The evaluation script saves:
 - `real_events.npy`
 - `its_events.npy`
 - `mcmcloitsnd_events.npy`
+- `tmd_true_vs_model_last_epoch.png`
 - `sampler_marginals.png`
-- `sampler_x_qt_projection.png`
+- `sampler_projection_x_qT_true_its_mcmc.png`
+- `sampler_projection_x_qT_differences.png`
+- matching `true_its_mcmc` and `differences` plots for each requested projection
+
+The TMD plot is the model sanity check: it compares truth and generator TMDs
+before and after theory evolution. The sampler plots compare physical event
+clouds after the SIDIS cross-section density has been sampled, so their axes are
+event variables such as `x`, `Q2`, `z`, `qT`, and `phi`; there is no sampler
+`b_T` output.
