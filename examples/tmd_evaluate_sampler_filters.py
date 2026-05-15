@@ -162,7 +162,8 @@ def main():
     opt = make(config.opt).to(device=device, dtype=dtype)
     state = torch.load(rundir / "optimizer.pt", map_location=device, weights_only=True)
     opt.load_state_dict(state, strict=False)
-    opt.eval()
+    opt.generator.eval()
+    opt.discriminator.eval()
 
     with torch.no_grad():
         noise = torch.normal(
