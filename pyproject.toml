@@ -27,6 +27,10 @@ classifiers = [
 dependencies = [
   "hydra-core",
   "matplotlib",
+  "numba",
+  "numpy",
+  "pyyaml",
+  "scipy",
   "tqdm",
   "torch",
 ]

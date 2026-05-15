@@ -14,3 +14,14 @@ register(
     entry_point="quantom_ips.envs.quantom_env:QuantomEnv",
     group="env",
 )
+
+register(
+    id="TMDQuantomEnv",
+    entry_point="quantom_ips.envs.tmd_quantom_env:TMDQuantomEnv",
+    group="env",
+    defaults=[
+        {"sampler": "ITS"},
+        {"theory": "IdentityTheory"},
+        "_self_",
+    ],
+)

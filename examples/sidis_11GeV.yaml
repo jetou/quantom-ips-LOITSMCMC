@@ -1,0 +1,86 @@
+# examples/kinematics/sidis_11GeV.yaml
+# Mother kinematics spec for SIDIS @ Ebeam=11 GeV
+# Contains ONLY independent knobs + grid resolution + spacing.
+# Dependent quantities (x_min, Q2_max, qt_max, etc.) should be derived in a small Python step.
+
+sidis:
+  # ------------------------
+  # Independent physics knobs
+  # ------------------------
+  Ebeam_GeV: 11.0
+  target_mass_GeV: 0.938        # proton mass M
+  hadron_mass_GeV: 0.13957      # pion mass M_h (used in qT/Q bound)
+
+  Q2_min_GeV2: 1.0
+  W2_min_GeV2: 4.0
+
+  z_min: 0.2
+  z_max: 0.8
+
+  # bT is not derived from the kinematics inequalities in your notes; keep it explicit
+  bt_min: 1.0e-3
+  bt_max: 6.0
+
+  phi_min: 0.0
+  phi_max: 6.283185307179586   # 2*pi
+
+  # Optional additional applicability cap (your code has qT_lim)
+  # This is NOT the kinematic bound from the inequality; it is an extra conservative cut.
+  qT_over_Q_lim: 0.3
+
+  # ------------------------
+  # “Hypercube” policy knobs
+  # ------------------------
+  # x and Q2 bounds are derived from Ebeam, Q2_min, and y<1 (and optionally W2_min).
+  x_policy:
+    x_max: 1.0
+    # Derive x_min as Q2_min / (s - M^2) by default (matches your notes + code)
+    derive_x_min_from_Q2min: true
+    # If you ever want to force an x_min anyway, set derive=false and provide x_min_override.
+    x_min_override: null
+
+  Q2_policy:
+    # Derive Q2_max = s - M^2 by default (matches your notes)
+    derive_Q2_max_from_s: true
+    Q2_max_override_GeV2: null
+
+  qT_policy:
+    # We will derive qt_max by scanning the inequality bound over (x,Q2,z) grid.
+    derive_qt_max_from_bound: true
+
+    # The scan range for computing qT*max. This does NOT set the final qt grid directly;
+    # it just bounds the search if you want a hard cap.
+    qt_scan_min: 0.0
+    qt_scan_max_cap: 1.0        # acts like a "do not exceed" cap even if inequality allows more
+
+    # If derive_qt_max_from_bound=false, you can set fixed qt_min/qt_max directly.
+    qt_min_override: 0.0
+    qt_max_override: 1.0
+
+  # ------------------------
+  # Grid resolution (shared by training + create_samples)
+  # ------------------------
+  grid:
+    nx: 20
+    nQ2: 20
+    nz: 10
+    nbt: 30
+    nqt: 10
+    nphi: 5
+
+  # ------------------------
+  # Spacing choices
+  # ------------------------
+  spacing:
+    log_x: true
+    log_Q2: false
+    log_z: false
+
+  # ------------------------
+  # Theory identity knobs (kept here so both scripts stay in sync)
+  # ------------------------
+  theory:
+    order: 0
+    tar: "p"
+    had: "pi+"
+    average: false

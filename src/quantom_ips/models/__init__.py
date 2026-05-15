@@ -17,6 +17,13 @@ register(
 )
 
 register(
+    id="MLPDiscriminatorSigOut",
+    entry_point="quantom_ips.models.mlp:MLP",
+    group="model",
+    kwargs=dict(out_activation="Sigmoid"),
+)
+
+register(
     id="GaussGeneratorV1",
     entry_point="quantom_ips.models.mlp:MLP",
     group="model",
@@ -27,6 +34,18 @@ register(
 register(
     id="Conv2DTGenerator",
     entry_point="quantom_ips.models.conv2d_generator:Conv2DTGenerator",
+    group="model",
+)
+
+register(
+    id="TMDConv2DTGenerator",
+    entry_point="quantom_ips.models.tmd_conv2d_generator:TMDConv2DTGenerator",
+    group="model",
+)
+
+register(
+    id="TMD3DGenerator",
+    entry_point="quantom_ips.models.tmd_3d_generator:TMD3DGenerator",
     group="model",
 )
 

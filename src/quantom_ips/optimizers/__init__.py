@@ -7,6 +7,30 @@ register(
 )
 
 register(
+    id="TMDGAN",
+    entry_point="quantom_ips.optimizers.tmd_gan_optimizer:GANOptimizer",
+    group="opt",
+    kwargs=dict(noise_dim=128),
+    defaults=[
+        {"/model@discriminator": "MLPDiscriminatorSigOut"},
+        {"/model@generator": "TMDConv2DTGenerator"},
+        "_self_",
+    ],
+)
+
+register(
+    id="TMDGANCC",
+    entry_point="quantom_ips.optimizers.tmd_gan_optimizer_cc:GANOptimizer",
+    group="opt",
+    kwargs=dict(noise_dim=128),
+    defaults=[
+        {"/model@discriminator": "MLPDiscriminatorSigOut"},
+        {"/model@generator": "TMDConv2DTGenerator"},
+        "_self_",
+    ],
+)
+
+register(
     id="Geomloss",
     entry_point="quantom_ips.optimizers.geomloss_optimizer:GeomlossOptimizer",
     group="opt",

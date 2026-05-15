@@ -21,6 +21,19 @@ register(
 )
 
 register(
+    id="tmd_events_numpy",
+    entry_point="quantom_ips.datasets.tmd_numpy_dataset:TMDNumpyDataset",
+    group="dataloader/dataset",
+)
+
+register(
+    id="tmd_events",
+    entry_point="quantom_ips.datasets.tmd_numpy_dataset:TMDDataLoader",
+    group="dataloader",
+    defaults=[{"dataset": "tmd_events_numpy"}, "_self_"],
+)
+
+register(
     id="mgaussian",
     entry_point="quantom_ips.datasets.multi_gaussian_dataset:MultiGaussianDataset",
     group="dataloader/dataset",

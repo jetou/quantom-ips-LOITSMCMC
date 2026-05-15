@@ -20,6 +20,12 @@ register(
 )
 
 register(
+    id="MCMCLOITSND",
+    entry_point=base_entry_point + ".mcmc_loits_nd:MCMCLOITSND",
+    group="env/sampler",
+)
+
+register(
     id="MVGS",
     entry_point=base_entry_point + ".multivariate_gaussian_sampler:MVGSampler",
     group="env/sampler",
