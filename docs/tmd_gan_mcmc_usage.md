@@ -23,11 +23,26 @@ python examples\tmd_workflow.py opt=TMDGANCC env=TMDQuantomEnv ^
   env/theory=SIDIS_masked_cc env/sampler=ITS ^
   dataloader=tmd_events dataloader.dataset.path=D:\path\to\sidis_dataset.npy ^
   opt.n_epochs=50 opt.train_on=events env.mode=events ^
+  opt.progress_bar=True opt.log_every=10 opt.mse_freq=10 ^
   hydra.run.dir=D:\path\to\run_dir
 ```
 
 Training uses `ITS` because the MCMC sampler is evaluation-only and is not
 intended to provide training gradients.
+
+You can also use the submission helper script:
+
+```bash
+bash examples/submission_scripts/training_tmd_gan_loitsmcmc.sh \
+  --epochs 500 \
+  --run-dir examples/results/tmd_gan_mcmc_500
+```
+
+For long runs, `opt.progress_bar=True` keeps the terminal compact by showing
+losses in a tqdm postfix instead of printing several lines every epoch. If you
+turn the progress bar off, `opt.log_every=10` controls how often one summary
+line is printed. `opt.mse_freq=10` computes the slower TMD/XSEC diagnostics
+every 10 epochs while still computing them at the final epoch.
 
 ## Compare Sampler Filters
 

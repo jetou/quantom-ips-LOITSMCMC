@@ -31,6 +31,75 @@ fi
 
 echo "LHAPDF_DATA_PATH=${LHAPDF_DATA_PATH:-unset}"
 
+nEpochs="${N_EPOCHS:-50}"
+resultDir="${RESULT_DIR:-$repoDir/examples/results/tmd_gan_mcmc}"
+sampleDir="${SAMPLE_DIR:-$repoDir/examples/sample_data}"
+dataDir="${DATA_PATH:-$sampleDir/sidis_dataset.npy}"
+B_gen="${B_GEN:-40}"
+B_real="${B_REAL:-40}"
+N_events="${N_EVENTS:-1000}"
+steps_per_epoch="${STEPS_PER_EPOCH:-1}"
+noise_dim="${NOISE_DIM:-128}"
+nf="${N_FLAV_OUT:-1}"
+device="${DEVICE:-cuda}"
+event_norm="${EVENT_NORM:-False}"
+sampler="${SAMPLER:-ITS}"
+theory="${THEORY:-SIDIS_masked_cc}"
+progress_bar="${PROGRESS_BAR:-True}"
+log_every="${LOG_EVERY:-10}"
+mse_freq="${MSE_FREQ:-10}"
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --epochs)
+      nEpochs="$2"
+      shift 2
+      ;;
+    --run-dir)
+      resultDir="$2"
+      shift 2
+      ;;
+    --data)
+      dataDir="$2"
+      shift 2
+      ;;
+    --sample-dir)
+      sampleDir="$2"
+      shift 2
+      ;;
+    --device)
+      device="$2"
+      shift 2
+      ;;
+    --steps-per-epoch)
+      steps_per_epoch="$2"
+      shift 2
+      ;;
+    --help|-h)
+      cat <<EOF
+Usage: bash examples/submission_scripts/training_tmd_gan_loitsmcmc.sh [options]
+
+Options:
+  --epochs N             Number of training epochs (default: $nEpochs)
+  --run-dir PATH         Hydra output/run directory (default: $resultDir)
+  --data PATH            SIDIS event dataset .npy path (default: $dataDir)
+  --sample-dir PATH      Directory containing density.npy/grid files (default: $sampleDir)
+  --device DEVICE        cuda or cpu (default: $device)
+  --steps-per-epoch N    Training steps per epoch (default: $steps_per_epoch)
+
+You can also set environment variables, e.g.:
+  N_EPOCHS=500 RESULT_DIR=examples/results/tmd_gan_mcmc_500 bash examples/submission_scripts/training_tmd_gan_loitsmcmc.sh
+EOF
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      echo "Run with --help for usage." >&2
+      exit 2
+      ;;
+  esac
+done
+
 export PYTHONPATH="$repoDir/src:${PYTHONPATH:-}"
 export QUANTOM_IPS_GRIDS_DIR="${QUANTOM_IPS_GRIDS_DIR:-$repoDir/examples/submission_scripts/grids}"
 mkdir -p "$QUANTOM_IPS_GRIDS_DIR"
@@ -46,22 +115,6 @@ fi
 nx=$(echo "$KIN_OVERRIDES"  | sed -n 's/.*env.theory.nx=\([^ ]*\).*/\1/p')
 nbt=$(echo "$KIN_OVERRIDES" | sed -n 's/.*env.theory.nbt=\([^ ]*\).*/\1/p')
 
-resultDir="${RESULT_DIR:-$repoDir/examples/results/tmd_gan_mcmc}"
-sampleDir="${SAMPLE_DIR:-$repoDir/examples/sample_data}"
-dataDir="${DATA_PATH:-$sampleDir/sidis_dataset.npy}"
-
-nEpochs="${N_EPOCHS:-50}"
-B_gen="${B_GEN:-40}"
-B_real="${B_REAL:-40}"
-N_events="${N_EVENTS:-1000}"
-steps_per_epoch="${STEPS_PER_EPOCH:-1}"
-noise_dim="${NOISE_DIM:-128}"
-nf="${N_FLAV_OUT:-1}"
-device="${DEVICE:-cuda}"
-event_norm="${EVENT_NORM:-False}"
-sampler="${SAMPLER:-ITS}"
-theory="${THEORY:-SIDIS_masked_cc}"
-
 CMD="python $repoDir/examples/tmd_workflow.py hydra.run.dir=$resultDir"
 CMD="$CMD device=$device"
 CMD="$CMD opt=TMDGANCC env=TMDQuantomEnv"
@@ -75,6 +128,7 @@ CMD="$CMD model@opt.discriminator=MLPDiscriminatorSigOut"
 CMD="$CMD opt.discriminator.input_dim=5 opt.discriminator.output_dim=1"
 CMD="$CMD model@opt.generator=TMDConv2DTGenerator"
 CMD="$CMD opt.batch_size=$B_gen opt.noise_dim=$noise_dim"
+CMD="$CMD opt.progress_bar=$progress_bar opt.log_every=$log_every opt.mse_freq=$mse_freq"
 CMD="$CMD opt.generator.mlp_in=$noise_dim"
 CMD="$CMD opt.generator.image_size=[$nx,$nbt]"
 CMD="$CMD opt.generator.out_channels=$nf"

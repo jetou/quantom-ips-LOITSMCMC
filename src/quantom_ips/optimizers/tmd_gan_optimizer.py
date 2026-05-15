@@ -46,6 +46,7 @@ class GANOptimizer(StatefulModule):
         train_on: str = "events",  # "events" or "xsec"
         sample_diagnostics: bool = True,  # keep epoch0/epochN event dumps
         mse_freq: int = 1,
+        log_every: int = 10,
         diag_n_events: int = int(1e5),    
         diag_n_repeats: int = 10,     # number of diagnostic reps
         diag_seed: int = 0,           # base seed for deterministic reps
@@ -73,9 +74,36 @@ class GANOptimizer(StatefulModule):
         self.label_noise = label_noise
         self.noise_dim = noise_dim
         self.mse_freq = mse_freq
+        self.log_every = log_every
 
         self.discriminator = make(discriminator)
         self.generator = make(generator)
+
+    def _metric_value(self, values, epoch):
+        try:
+            value = values[epoch].detach().cpu().item()
+        except Exception:
+            return None
+        return value if np.isfinite(value) else None
+
+    def _epoch_metrics(self, epoch, gen_loss, disc_loss, input_mse, xsec_mse, tmd_mse):
+        metrics = {
+            "G": f"{gen_loss.detach().cpu().item():.3e}",
+            "D": f"{disc_loss.detach().cpu().item():.3e}",
+        }
+        for key, values in (("input", input_mse), ("xsec", xsec_mse), ("tmd", tmd_mse)):
+            value = self._metric_value(values, epoch)
+            if value is not None:
+                metrics[key] = f"{value:.3e}"
+        return metrics
+
+    def _should_log_epoch(self, epoch, n_epochs):
+        log_every = max(1, int(self.log_every))
+        return epoch == 0 or (epoch + 1) % log_every == 0 or epoch == n_epochs - 1
+
+    def _print_epoch_summary(self, epoch, n_epochs, metrics):
+        parts = " | ".join(f"{key}={value}" for key, value in metrics.items())
+        print(f"Epoch {epoch + 1}/{n_epochs}: {parts}")
 
 
     
@@ -314,8 +342,11 @@ class GANOptimizer(StatefulModule):
         # --------------------------
         # Main training loop
         # --------------------------
-        for epoch in range(n_epochs):
-            print(f"Epoch {epoch+1}/{n_epochs}")
+        epoch_iter = range(n_epochs)
+        if self.progress_bar:
+            epoch_iter = tqdm(epoch_iter, desc="TMD-GAN", unit="epoch")
+
+        for epoch in epoch_iter:
     
             if self.train_on == "events":
                 # decide how many steps this epoch
@@ -323,8 +354,6 @@ class GANOptimizer(StatefulModule):
                 
                 data_iter = iter(data_parser)
                 iter_steps = range(steps_this_epoch)
-                if self.progress_bar:
-                    iter_steps = tqdm(iter_steps)
                 
                 for _ in iter_steps:
                     try:
@@ -557,11 +586,6 @@ class GANOptimizer(StatefulModule):
                     input_mse[epoch]     = mse_in_per.mean()
                     input_mse_std[epoch] = mse_in_per.std(unbiased=False)
                     
-                    print(
-                        f"  [Epoch {epoch+1}] INPUT MSE (all x, b_T): "
-                        f"{input_mse[epoch].item():.3e} +/- {input_mse_std[epoch].item():.3e}"
-                    )
-
     
                     # ----------------------------------------------------
                     # Cross-section MSE at this epoch (compare to xsec_true)
@@ -598,12 +622,6 @@ class GANOptimizer(StatefulModule):
                     xsec_mse[epoch]     = mse_x_per.mean().detach().cpu()
                     xsec_mse_std[epoch] = mse_x_per.std(unbiased=False).detach().cpu()
                     
-                    print(
-                        f"  [Epoch {epoch+1}] XSEC MSE (all bins): "
-                        f"{xsec_mse[epoch].item():.3e} +/- {xsec_mse_std[epoch].item():.3e}"
-                    )
-    
-        
                     if epoch == n_epochs - 1:
                         last_gen_tmd_input = gen_input_mean.detach().cpu().clone()
                         last_gen_tmd       = tmd_gen_mean.detach().cpu().clone()
@@ -611,10 +629,11 @@ class GANOptimizer(StatefulModule):
                         last_gen_tmd_ens       = (tmd_gen_ens.detach().cpu().clone()
                                                   if free_tmd_mode else tmd_gen_ens.detach().cpu().clone())
         
-                    print(
-                            f"  [Epoch {epoch+1}] TMD MSE (all x, Q^2, b_T): "
-                            f"{tmd_mse[epoch].item():.3e} +/- {tmd_mse_std[epoch].item():.3e}"
-                            )
+            metrics = self._epoch_metrics(epoch, gen_loss, disc_loss, input_mse, xsec_mse, tmd_mse)
+            if self.progress_bar:
+                epoch_iter.set_postfix(metrics)
+            elif self._should_log_epoch(epoch, n_epochs):
+                self._print_epoch_summary(epoch, n_epochs, metrics)
 
     
         # --------------------------
@@ -655,6 +674,5 @@ class GANOptimizer(StatefulModule):
             "last_gen_tmd_ens": last_gen_tmd_ens,
             "xsec_true": xsec_true_cpu,
         }
-
 
 
