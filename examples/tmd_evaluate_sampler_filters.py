@@ -138,6 +138,11 @@ def main():
     if not config_path.exists():
         raise FileNotFoundError(f"Hydra config not found: {config_path}")
     config = OmegaConf.create(yaml.safe_load(config_path.read_text(encoding="utf-8")))
+    OmegaConf.set_struct(config, False)
+    if "opt" in config:
+        config.opt.logdir = str(rundir)
+    if "output_dir" in config:
+        config.output_dir = str(rundir)
 
     device = torch.device(args.device)
     dtype = get_dtype(args.dtype)
