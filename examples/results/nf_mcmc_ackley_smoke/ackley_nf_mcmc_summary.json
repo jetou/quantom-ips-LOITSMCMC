@@ -1,0 +1,10 @@
+{
+  "device": "cpu",
+  "n_events": 500,
+  "truth_acceptance_rate": 0.8766666666666667,
+  "nf_mcmc_acceptance_rate": 0.32264000177383423,
+  "raw_nf_js_to_truth": 0.6876020027059657,
+  "nf_mcmc_js_to_truth": 0.6671652904020913,
+  "nf_train_steps": 2,
+  "nf_train_samples": 256
+}
