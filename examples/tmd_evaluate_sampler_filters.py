@@ -22,6 +22,7 @@ from quantom_ips.utils.torch_nn_registry import get_dtype
 AXIS_NAMES = ["x", "Q2", "z", "qT", "phi"]
 AXIS_INDEX = {name.lower(): idx for idx, name in enumerate(AXIS_NAMES)}
 DEFAULT_PROJECTIONS = ["x,qT", "x,Q2", "z,qT", "qT,phi"]
+DEFAULT_SAMPLERS = ["ITS", "MCMCLOITSND", "NFMCMCND"]
 
 
 def load_events(path, event_dim=5, n_events=None, seed=0):
@@ -65,6 +66,24 @@ def metric_block(real_hist, sample_hist):
         "l1_error": float(np.abs(real_hist - sample_hist).sum()),
         "density_mae": float(np.abs(real_hist - sample_hist).mean()),
     }
+
+
+def format_acceptance_rate(metrics, sampler_name="MCMCLOITSND"):
+    rate = metrics.get(sampler_name, {}).get("acceptance_rate")
+    if rate is None:
+        return "N/A"
+    return f"{float(rate):.3f}"
+
+
+def format_acceptance_summary(metrics):
+    pieces = []
+    for name, values in metrics.items():
+        if not isinstance(values, dict):
+            continue
+        rate = values.get("acceptance_rate")
+        if rate is not None:
+            pieces.append(f"{name} acc={float(rate):.3f}")
+    return ", ".join(pieces) if pieces else "MCMC acceptance rate = N/A"
 
 
 def projection_metric_block(real_hist, sample_hist, x_edges, y_edges):
@@ -133,7 +152,9 @@ def _hist_density(events, bin_edges):
     return hist.astype(np.float64)
 
 
-def plot_event_distributions_with_uncertainty(real_events, sample_reps_by_name, bins, outpath):
+def plot_event_distributions_with_uncertainty(
+    real_events, sample_reps_by_name, bins, outpath, acceptance_rate_text="N/A"
+):
     n_dims = len(bins)
     n_cols = 3
     n_rows = int(np.ceil(n_dims / n_cols))
@@ -144,7 +165,7 @@ def plot_event_distributions_with_uncertainty(real_events, sample_reps_by_name, 
         constrained_layout=True,
     )
     axes = np.asarray(axes).reshape(-1)
-    colors = {"ITS": "tab:orange", "MCMCLOITSND": "tab:green"}
+    colors = {"ITS": "tab:orange", "MCMCLOITSND": "tab:green", "NFMCMCND": "tab:purple"}
 
     for dim in range(n_dims):
         ax = axes[dim]
@@ -186,7 +207,10 @@ def plot_event_distributions_with_uncertainty(real_events, sample_reps_by_name, 
         if axes[-1].has_data():
             axes[-1].legend(loc="best", frameon=True)
 
-    fig.suptitle("Event Distributions with Statistical Uncertainty (Real vs ITS vs MCMCLOITSND)")
+    fig.suptitle(
+        "Event Distributions with Statistical Uncertainty "
+        f"(Real vs samplers; {acceptance_rate_text})"
+    )
     fig.savefig(outpath, dpi=170)
     plt.close(fig)
 
@@ -201,7 +225,9 @@ def axis_label(name):
     return name
 
 
-def plot_pair_projection(real_events, samples_by_name, bins, outpath, dims=(0, 3)):
+def plot_pair_projection(
+    real_events, samples_by_name, bins, outpath, dims=(0, 3), acceptance_rate_text="N/A"
+):
     names = ["true"] + list(samples_by_name.keys())
     events_list = [real_events] + list(samples_by_name.values())
     hists = [
@@ -229,20 +255,27 @@ def plot_pair_projection(real_events, samples_by_name, bins, outpath, dims=(0, 3
         ax.set_ylabel(AXIS_NAMES[dims[1]])
         if AXIS_NAMES[dims[0]] == "x":
             ax.set_xscale("log")
+    fig.suptitle(acceptance_rate_text)
     fig.colorbar(im, ax=axes, shrink=0.82, label="counts")
     fig.savefig(outpath, dpi=160)
     plt.close(fig)
 
 
-def plot_difference_projection(real_events, samples_by_name, bins, outpath, dims=(0, 3)):
+def plot_difference_projection(
+    real_events, samples_by_name, bins, outpath, dims=(0, 3), acceptance_rate_text="N/A"
+):
     real_hist = histogram2d_probability(real_events, bins, dims)
     comparisons = []
     for name, events in samples_by_name.items():
         comparisons.append((f"{name} - true", histogram2d_probability(events, bins, dims) - real_hist))
     if "ITS" in samples_by_name and "MCMCLOITSND" in samples_by_name:
         its_hist = histogram2d_probability(samples_by_name["ITS"], bins, dims)
-        mcmc_hist = histogram2d_probability(samples_by_name["MCMCLOITSND"], bins, dims)
-        comparisons.append(("MCMCLOITSND - ITS", mcmc_hist - its_hist))
+        loits_hist = histogram2d_probability(samples_by_name["MCMCLOITSND"], bins, dims)
+        comparisons.append(("MCMCLOITSND - ITS", loits_hist - its_hist))
+    if "MCMCLOITSND" in samples_by_name and "NFMCMCND" in samples_by_name:
+        loits_hist = histogram2d_probability(samples_by_name["MCMCLOITSND"], bins, dims)
+        nf_hist = histogram2d_probability(samples_by_name["NFMCMCND"], bins, dims)
+        comparisons.append(("NFMCMCND - MCMCLOITSND", nf_hist - loits_hist))
     if not comparisons:
         return
 
@@ -265,6 +298,7 @@ def plot_difference_projection(real_events, samples_by_name, bins, outpath, dims
         ax.set_ylabel(AXIS_NAMES[dims[1]])
         if AXIS_NAMES[dims[0]] == "x":
             ax.set_xscale("log")
+    fig.suptitle(acceptance_rate_text)
     fig.colorbar(im, ax=axes, shrink=0.82, label="probability difference")
     fig.savefig(outpath, dpi=160)
     plt.close(fig)
@@ -362,10 +396,13 @@ def ensure_flavor_dim(env, params):
     return params
 
 
-def make_sampler(name):
+def make_sampler(name, overrides=None):
     if name not in registry:
         raise KeyError(f"Sampler {name} is not registered")
-    return make(registry[name].kwargs)
+    kwargs = registry[name].kwargs
+    if overrides:
+        kwargs = OmegaConf.merge(kwargs, overrides)
+    return make(kwargs)
 
 
 def main():
@@ -390,6 +427,16 @@ def main():
         default=DEFAULT_PROJECTIONS,
         help="Two-axis event projections, e.g. x,qT x,Q2 z,qT qT,phi",
     )
+    parser.add_argument(
+        "--samplers",
+        nargs="*",
+        default=DEFAULT_SAMPLERS,
+        help="Sampler ids to compare, e.g. ITS MCMCLOITSND NFMCMCND",
+    )
+    parser.add_argument("--nf-train-steps", type=int, default=300, help="NFMCMCND flow training steps")
+    parser.add_argument("--nf-train-samples", type=int, default=4096, help="NFMCMCND flow training samples")
+    parser.add_argument("--nf-burn-in", type=int, default=16, help="NFMCMCND MH burn-in steps")
+    parser.add_argument("--nf-thin", type=int, default=4, help="NFMCMCND MH thinning steps")
     parser.add_argument("--q-index", type=int, default=None, help="Q2 index for the TMD evolved plot")
     parser.add_argument(
         "--skip-tmd-plot",
@@ -447,7 +494,18 @@ def main():
         params = ensure_flavor_dim(env, opt.generator(noise))
         density, grid_axes, _ = env.theory.forward(params)
 
-        samplers = {"ITS": make_sampler("ITS"), "MCMCLOITSND": make_sampler("MCMCLOITSND")}
+        sampler_overrides = {
+            "NFMCMCND": {
+                "train_steps": args.nf_train_steps,
+                "train_samples": args.nf_train_samples,
+                "burn_in": args.nf_burn_in,
+                "thin": args.nf_thin,
+            }
+        }
+        samplers = {
+            name: make_sampler(name, sampler_overrides.get(name))
+            for name in args.samplers
+        }
         samples_by_name = {}
         sample_reps_by_name = {}
         metrics = {}
@@ -457,11 +515,11 @@ def main():
         projections = parse_projection_specs(args.projections)
 
         np.save(outdir / "real_events.npy", real_events)
-        for name, sampler in samplers.items():
+        for sampler_index, (name, sampler) in enumerate(samplers.items()):
             reps = []
             acceptance_rates = []
             for repeat in range(max(1, int(args.n_repeats))):
-                torch.manual_seed(args.seed + 1009 * repeat + 17 * (name == "MCMCLOITSND"))
+                torch.manual_seed(args.seed + 1009 * repeat + 17 * sampler_index)
                 events = sampler.forward(density, grid_axes, args.n_events)
                 events = events.reshape(-1, events.shape[-1]).detach().cpu().numpy()
                 events = events[: args.n_events].astype(np.float64)
@@ -503,6 +561,8 @@ def main():
     with (outdir / "sampler_filter_metrics.json").open("w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=2)
 
+    mcmc_acceptance_rate = format_acceptance_summary(metrics)
+
     if not args.skip_tmd_plot:
         plot_tmd_model_check(
             rundir,
@@ -517,6 +577,7 @@ def main():
         sample_reps_by_name,
         bins,
         outdir / "sampler_event_distributions_uncertainty.png",
+        acceptance_rate_text=mcmc_acceptance_rate,
     )
     for dims, label in projections:
         plot_pair_projection(
@@ -525,6 +586,7 @@ def main():
             bins,
             outdir / f"sampler_projection_{label}_true_its_mcmc.png",
             dims=dims,
+            acceptance_rate_text=mcmc_acceptance_rate,
         )
         plot_difference_projection(
             real_events,
@@ -532,8 +594,11 @@ def main():
             bins,
             outdir / f"sampler_projection_{label}_differences.png",
             dims=dims,
+            acceptance_rate_text=mcmc_acceptance_rate,
         )
 
+    print(f"Sampler acceptance rates: {mcmc_acceptance_rate}")
+    print(f"Saved sampler_filter_metrics.json to {outdir / 'sampler_filter_metrics.json'}")
     print(f"Saved sampler comparison outputs to {outdir}")
 
 

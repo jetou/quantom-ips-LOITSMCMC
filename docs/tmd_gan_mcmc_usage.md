@@ -53,6 +53,9 @@ python examples\tmd_evaluate_sampler_filters.py ^
   --n-events 10000 ^
   --n-repeats 10 ^
   --outdir D:\path\to\eval_dir ^
+  --samplers ITS MCMCLOITSND NFMCMCND ^
+  --nf-train-steps 300 ^
+  --nf-train-samples 4096 ^
   --projections x,qT x,Q2 z,qT qT,phi
 ```
 
@@ -64,12 +67,30 @@ The evaluation script saves:
 - `its_events_reps.npy`
 - `mcmcloitsnd_events.npy`
 - `mcmcloitsnd_events_reps.npy`
+- `nfmcmcnd_events.npy`
+- `nfmcmcnd_events_reps.npy`
 - `tmd_true_vs_model_last_epoch.png`
 - `sampler_marginals.png`
 - `sampler_event_distributions_uncertainty.png`
 - `sampler_projection_x_qT_true_its_mcmc.png`
 - `sampler_projection_x_qT_differences.png`
 - matching `true_its_mcmc` and `differences` plots for each requested projection
+
+The sampler figures annotate the mean acceptance rates for accept/reject
+samplers such as `MCMCLOITSND` and `NFMCMCND`. `ITS` is not an accept/reject
+sampler, so its acceptance rate is not reported.
+
+To compare only the two MCMC-corrected samplers:
+
+```bash
+python examples\tmd_evaluate_sampler_filters.py ^
+  --rundir D:\path\to\run_dir ^
+  --data D:\path\to\sidis_dataset.npy ^
+  --n-events 10000 ^
+  --n-repeats 10 ^
+  --outdir D:\path\to\eval_dir ^
+  --samplers MCMCLOITSND NFMCMCND
+```
 
 The TMD plot is the model sanity check: it compares truth and generator TMDs
 before and after theory evolution. The sampler plots compare physical event

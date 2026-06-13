@@ -26,6 +26,12 @@ register(
 )
 
 register(
+    id="NFMCMCND",
+    entry_point=base_entry_point + ".nf_mcmc_nd:NFMCMCND",
+    group="env/sampler",
+)
+
+register(
     id="MVGS",
     entry_point=base_entry_point + ".multivariate_gaussian_sampler:MVGSampler",
     group="env/sampler",
