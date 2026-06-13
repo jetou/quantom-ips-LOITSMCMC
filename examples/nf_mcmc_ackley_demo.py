@@ -178,6 +178,7 @@ def plot_marginals(truth, corrected, raw_nf, outpath, bins=80):
 
 
 def plot_acceptance_sweep(summary, outpath):
+    summary = [row for row in summary if row.get("acceptance_rate") is not None]
     if not summary:
         return
     dims = [row["dim"] for row in summary]
@@ -205,20 +206,41 @@ def make_ackley_nd_grid(dim, grid_n, device, dtype):
 def run_dimension_sweep(args, device, dtype):
     rows = []
     for dim in range(args.sweep_min_dim, args.sweep_max_dim + 1):
-        density, axes = make_ackley_nd_grid(dim, args.sweep_grid_n, device, dtype)
-        sampler = NFMCMCND(
-            train_steps=args.sweep_train_steps,
-            train_samples=args.sweep_train_samples,
-            batch_size=args.batch_size,
-            flow_layers=args.flow_layers,
-            hidden_dim=args.hidden_dim,
-            burn_in=args.nf_burn_in,
-            thin=args.nf_thin,
-        )
-        _, rate = sampler.sample(density, axes, args.sweep_events, cache_key=("ackley-sweep", dim))
-        row = {"dim": dim, "acceptance_rate": float(rate), "grid_n": args.sweep_grid_n}
-        rows.append(row)
-        print(f"D={dim}: NF-MCMC acceptance={rate:.3f}")
+        try:
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+            density, axes = make_ackley_nd_grid(dim, args.sweep_grid_n, device, dtype)
+            sampler = NFMCMCND(
+                train_steps=args.sweep_train_steps,
+                train_samples=args.sweep_train_samples,
+                batch_size=args.batch_size,
+                flow_layers=args.flow_layers,
+                hidden_dim=args.hidden_dim,
+                burn_in=args.nf_burn_in,
+                thin=args.nf_thin,
+            )
+            _, rate = sampler.sample(density, axes, args.sweep_events, cache_key=("ackley-sweep", dim))
+            row = {"dim": dim, "acceptance_rate": float(rate), "grid_n": args.sweep_grid_n}
+            rows.append(row)
+            print(f"D={dim}: NF-MCMC acceptance={rate:.3f}")
+        except RuntimeError as exc:
+            if "out of memory" not in str(exc).lower():
+                raise
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+            row = {
+                "dim": dim,
+                "acceptance_rate": None,
+                "grid_n": args.sweep_grid_n,
+                "error": "CUDA out of memory",
+            }
+            rows.append(row)
+            print(f"D={dim}: skipped because CUDA ran out of memory at grid_n={args.sweep_grid_n}.")
+            break
+        finally:
+            with (Path(args.outdir) / "dimension_sweep_partial.json").open("w", encoding="utf-8") as f:
+                json.dump(rows, f, indent=2)
+            plot_acceptance_sweep(rows, Path(args.outdir) / "ackley_nf_mcmc_acceptance_vs_dim_partial.png")
     return rows
 
 
