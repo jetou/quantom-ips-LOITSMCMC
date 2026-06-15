@@ -13,6 +13,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from quantom_ips.envs.samplers.nf_mcmc_nd import NFMCMCND
+from quantom_ips.envs.samplers.mcmc_loits_nd import MCMCLOITSND
 
 
 R_MIN = -2.0
@@ -178,17 +179,37 @@ def plot_marginals(truth, corrected, raw_nf, outpath, bins=80):
 
 
 def plot_acceptance_sweep(summary, outpath):
-    summary = [row for row in summary if row.get("acceptance_rate") is not None]
+    summary = [
+        row
+        for row in summary
+        if row.get("acceptance_rate") is not None
+        or row.get("nf_mcmc_acceptance_rate") is not None
+        or row.get("loits_mcmc_acceptance_rate") is not None
+    ]
     if not summary:
         return
-    dims = [row["dim"] for row in summary]
-    rates = [row["acceptance_rate"] for row in summary]
     fig, ax = plt.subplots(figsize=(6.2, 4.2), constrained_layout=True)
-    ax.plot(dims, rates, marker="o")
+    dims = [row["dim"] for row in summary]
+
+    if any("nf_mcmc_acceptance_rate" in row for row in summary):
+        nf_dims = [row["dim"] for row in summary if row.get("nf_mcmc_acceptance_rate") is not None]
+        nf_rates = [row["nf_mcmc_acceptance_rate"] for row in summary if row.get("nf_mcmc_acceptance_rate") is not None]
+        ax.plot(nf_dims, nf_rates, marker="o", label="NF-MCMC")
+
+    if any("loits_mcmc_acceptance_rate" in row for row in summary):
+        loits_dims = [row["dim"] for row in summary if row.get("loits_mcmc_acceptance_rate") is not None]
+        loits_rates = [row["loits_mcmc_acceptance_rate"] for row in summary if row.get("loits_mcmc_acceptance_rate") is not None]
+        ax.plot(loits_dims, loits_rates, marker="s", label="LOITS-MCMC")
+
+    if not any("nf_mcmc_acceptance_rate" in row or "loits_mcmc_acceptance_rate" in row for row in summary):
+        rates = [row["acceptance_rate"] for row in summary]
+        ax.plot(dims, rates, marker="o", label="NF-MCMC")
+
     ax.set_xlabel("Dimensionality (D)")
     ax.set_ylabel("Acceptance rate")
-    ax.set_title("NF-MCMC acceptance rate vs dimensionality")
+    ax.set_title("MCMC acceptance rate vs dimensionality")
     ax.grid(alpha=0.3)
+    ax.legend()
     fig.savefig(outpath, dpi=180)
     plt.close(fig)
 
@@ -210,7 +231,7 @@ def run_dimension_sweep(args, device, dtype):
             if device.type == "cuda":
                 torch.cuda.empty_cache()
             density, axes = make_ackley_nd_grid(dim, args.sweep_grid_n, device, dtype)
-            sampler = NFMCMCND(
+            nf_sampler = NFMCMCND(
                 train_steps=args.sweep_train_steps,
                 train_samples=args.sweep_train_samples,
                 batch_size=args.batch_size,
@@ -219,10 +240,32 @@ def run_dimension_sweep(args, device, dtype):
                 burn_in=args.nf_burn_in,
                 thin=args.nf_thin,
             )
-            _, rate = sampler.sample(density, axes, args.sweep_events, cache_key=("ackley-sweep", dim))
-            row = {"dim": dim, "acceptance_rate": float(rate), "grid_n": args.sweep_grid_n}
+            _, nf_rate = nf_sampler.sample(
+                density,
+                axes,
+                args.sweep_events,
+                cache_key=("ackley-sweep", dim),
+            )
+
+            loits_sampler = MCMCLOITSND(
+                burn_in=args.loits_burn_in,
+                thin=args.loits_thin,
+                step_radius=args.loits_step_radius,
+            )
+            _, loits_rate = loits_sampler.sample(density, axes, args.sweep_events)
+
+            row = {
+                "dim": dim,
+                "acceptance_rate": float(nf_rate),
+                "nf_mcmc_acceptance_rate": float(nf_rate),
+                "loits_mcmc_acceptance_rate": float(loits_rate),
+                "grid_n": args.sweep_grid_n,
+            }
             rows.append(row)
-            print(f"D={dim}: NF-MCMC acceptance={rate:.3f}")
+            print(
+                f"D={dim}: NF-MCMC acceptance={nf_rate:.3f} | "
+                f"LOITS-MCMC acceptance={loits_rate:.3f}"
+            )
         except RuntimeError as exc:
             if "out of memory" not in str(exc).lower():
                 raise
@@ -231,6 +274,8 @@ def run_dimension_sweep(args, device, dtype):
             row = {
                 "dim": dim,
                 "acceptance_rate": None,
+                "nf_mcmc_acceptance_rate": None,
+                "loits_mcmc_acceptance_rate": None,
                 "grid_n": args.sweep_grid_n,
                 "error": "CUDA out of memory",
             }
@@ -260,6 +305,9 @@ def parse_args():
     parser.add_argument("--hidden-dim", type=int, default=128)
     parser.add_argument("--nf-burn-in", type=int, default=20)
     parser.add_argument("--nf-thin", type=int, default=5)
+    parser.add_argument("--loits-burn-in", type=int, default=16)
+    parser.add_argument("--loits-thin", type=int, default=4)
+    parser.add_argument("--loits-step-radius", type=int, default=1)
     parser.add_argument("--run-sweep", action="store_true")
     parser.add_argument("--sweep-min-dim", type=int, default=2)
     parser.add_argument("--sweep-max-dim", type=int, default=8)

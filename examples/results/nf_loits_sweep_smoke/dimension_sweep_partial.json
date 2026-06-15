@@ -1,0 +1,16 @@
+[
+  {
+    "dim": 2,
+    "acceptance_rate": 0.5600000023841858,
+    "nf_mcmc_acceptance_rate": 0.5600000023841858,
+    "loits_mcmc_acceptance_rate": 0.803906261920929,
+    "grid_n": 4
+  },
+  {
+    "dim": 3,
+    "acceptance_rate": 0.45750001072883606,
+    "nf_mcmc_acceptance_rate": 0.45750001072883606,
+    "loits_mcmc_acceptance_rate": 0.859375,
+    "grid_n": 4
+  }
+]
