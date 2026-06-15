@@ -1,0 +1,23 @@
+[
+  {
+    "dim": 2,
+    "acceptance_rate": 0.4037500023841858,
+    "nf_mcmc_acceptance_rate": 0.4037500023841858,
+    "loits_mcmc_acceptance_rate": 0.5023437738418579,
+    "grid_n": 4
+  },
+  {
+    "dim": 3,
+    "acceptance_rate": 0.5756250023841858,
+    "nf_mcmc_acceptance_rate": 0.5756250023841858,
+    "loits_mcmc_acceptance_rate": 0.4140625,
+    "grid_n": 4
+  },
+  {
+    "dim": 4,
+    "acceptance_rate": 0.5687500238418579,
+    "nf_mcmc_acceptance_rate": 0.5687500238418579,
+    "loits_mcmc_acceptance_rate": 0.3304687440395355,
+    "grid_n": 4
+  }
+]

@@ -70,6 +70,25 @@ class MCMCLOITSND(StatefulModule):
             total = cell_probs.sum()
         return cell_probs / total
 
+    def _cell_marginals(self, cell_probs):
+        marginals = []
+        for dim in range(cell_probs.ndim):
+            reduce_dims = tuple(axis for axis in range(cell_probs.ndim) if axis != dim)
+            marginal = cell_probs.sum(dim=reduce_dims)
+            marginal = marginal / marginal.sum().clamp_min(torch.finfo(cell_probs.dtype).tiny)
+            marginals.append(marginal)
+        return marginals
+
+    def _draw_from_product_marginals(self, marginals, n_events):
+        indices = []
+        q_prob = None
+        for marginal in marginals:
+            dim_idx = torch.multinomial(marginal, n_events, replacement=True)
+            indices.append(dim_idx)
+            dim_q = marginal[dim_idx].clamp_min(torch.finfo(marginal.dtype).tiny)
+            q_prob = dim_q if q_prob is None else q_prob * dim_q
+        return torch.stack(indices, dim=-1), q_prob
+
     def _flatten_indices(self, indices, shape):
         flat = torch.zeros(indices.shape[0], device=indices.device, dtype=torch.long)
         stride = 1
@@ -110,40 +129,31 @@ class MCMCLOITSND(StatefulModule):
         cell_probs = self._cell_probabilities(A)
         cell_shape = tuple(cell_probs.shape)
         flat_probs = cell_probs.reshape(-1)
+        marginals = self._cell_marginals(cell_probs)
 
-        start = torch.multinomial(flat_probs, n_events, replacement=True)
-        current = self._unflatten_indices(start, cell_shape)
-        current_prob = flat_probs[start].clamp_min(torch.finfo(dtype).tiny)
+        current, current_q = self._draw_from_product_marginals(marginals, n_events)
+        current_flat = self._flatten_indices(current, cell_shape)
+        current_prob = flat_probs[current_flat].clamp_min(torch.finfo(dtype).tiny)
+        current_q = current_q.clamp_min(torch.finfo(dtype).tiny)
 
         n_steps = max(0, int(self.burn_in)) + max(1, int(self.thin))
         accepted = torch.zeros((), device=device, dtype=dtype)
         proposed = torch.zeros((), device=device, dtype=dtype)
-        radius = max(1, int(self.step_radius))
 
         for _ in range(n_steps):
-            delta = torch.randint(
-                -radius,
-                radius + 1,
-                current.shape,
-                device=device,
-                dtype=torch.long,
-            )
-            candidate = current + delta
-            valid = torch.ones(n_events, device=device, dtype=torch.bool)
-            for dim, size in enumerate(cell_shape):
-                valid = valid & (candidate[:, dim] >= 0) & (candidate[:, dim] < size)
-
-            candidate = torch.where(valid.unsqueeze(-1), candidate, current)
+            candidate, candidate_q = self._draw_from_product_marginals(marginals, n_events)
             candidate_flat = self._flatten_indices(candidate, cell_shape)
             candidate_prob = flat_probs[candidate_flat].clamp_min(
                 torch.finfo(dtype).tiny
             )
+            candidate_q = candidate_q.clamp_min(torch.finfo(dtype).tiny)
 
-            ratio = (candidate_prob / current_prob).clamp_max(1)
+            ratio = ((candidate_prob * current_q) / (current_prob * candidate_q)).clamp_max(1)
             u = torch.rand(n_events, device=device, dtype=dtype)
             accept = u < ratio
             current = torch.where(accept.unsqueeze(-1), candidate, current)
             current_prob = torch.where(accept, candidate_prob, current_prob)
+            current_q = torch.where(accept, candidate_q, current_q)
 
             proposed = proposed + n_events
             accepted = accepted + accept.to(dtype).sum()
