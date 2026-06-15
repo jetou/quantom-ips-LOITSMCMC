@@ -13,7 +13,7 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from quantom_ips.envs.samplers.nf_mcmc_nd import NFMCMCND
+from quantom_ips.envs.samplers.nf_mcmc_nd import NFMCMCND, _RealNVP
 from quantom_ips.envs.samplers.mcmc_loits_nd import MCMCLOITSND
 
 
@@ -397,6 +397,116 @@ def notebook_style_loits_acceptance(density, n_events, grid_size=2, burn_in=0, t
     return (accepted / proposed.clamp_min(1)).detach().cpu().item()
 
 
+def draw_notebook_style_loits_unit_samples(density, n_samples, grid_size=2):
+    device, dtype = density.device, density.dtype
+    dim = density.ndim
+    eps = torch.finfo(dtype).tiny
+    grid_size = max(1, min(int(grid_size), min(density.shape)))
+    axis_slices = [_coarse_slices(density.shape[d], grid_size) for d in range(dim)]
+    cell_indices = list(itertools.product(range(grid_size), repeat=dim))
+
+    weights = []
+    cell_slices = []
+    for idx in cell_indices:
+        slices = tuple(axis_slices[d][idx[d]] for d in range(dim))
+        cell_slices.append(slices)
+        weights.append(density[slices].clamp_min(0).sum())
+    weights = torch.stack(weights)
+    if not torch.isfinite(weights).all() or weights.sum() <= 0:
+        weights = torch.ones_like(weights)
+    weights = weights / weights.sum()
+
+    assignments = torch.multinomial(weights, n_samples, replacement=True)
+    samples = torch.empty(n_samples, dim, device=device, dtype=dtype)
+
+    for cell_id, slices in enumerate(cell_slices):
+        mask = assignments == cell_id
+        n_cell = int(mask.sum().item())
+        if n_cell <= 0:
+            continue
+        starts = [s.start for s in slices]
+        stops = [s.stop for s in slices]
+        sizes = [max(1, stop - start) for start, stop in zip(starts, stops)]
+        centers = [start + size // 2 for start, size in zip(starts, sizes)]
+        local_samples = []
+
+        for d in range(dim):
+            indexer = []
+            for axis in range(dim):
+                if axis == d:
+                    indexer.append(slice(starts[axis], stops[axis]))
+                else:
+                    indexer.append(centers[axis])
+            line = density[tuple(indexer)].clamp_min(eps)
+            line = line / line.sum().clamp_min(eps)
+            local = torch.multinomial(line, n_cell, replacement=True)
+            jitter = torch.rand(n_cell, device=device, dtype=dtype)
+            # Map grid-point proposals to unit coordinates and jitter inside the local bin.
+            unit = (local.to(dtype) + starts[d] + jitter) / max(density.shape[d], 1)
+            local_samples.append(unit.clamp(1e-6, 1.0 - 1e-6))
+
+        samples[mask] = torch.stack(local_samples, dim=-1)
+
+    return samples
+
+
+def nf_mcmc_acceptance_from_training_units(
+    density,
+    axes,
+    n_events,
+    train_unit,
+    train_steps,
+    batch_size,
+    flow_layers,
+    hidden_dim,
+    burn_in,
+    thin,
+):
+    device, dtype = density.device, density.dtype
+    dim = density.ndim
+    helper = NFMCMCND(burn_in=burn_in, thin=thin)
+    flow = _RealNVP(dim, hidden_dim=int(hidden_dim), n_layers=int(flow_layers)).to(device=device, dtype=dtype)
+    optimizer = torch.optim.Adam(flow.parameters(), lr=1e-3)
+    n_train = train_unit.shape[0]
+    batch_size = min(int(batch_size), n_train)
+
+    for _ in range(max(0, int(train_steps))):
+        idx = torch.randint(0, n_train, (batch_size,), device=device)
+        batch = train_unit[idx]
+        loss = -flow.log_prob(batch).mean()
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+    flow.eval()
+    flat_log_density = helper._cell_log_densities(density, axes).reshape(-1)
+    cell_shape = tuple(max(grid.numel() - 1, 1) for grid in axes)
+
+    with torch.no_grad():
+        current_unit, current_log_q = flow.sample(n_events, device=device, dtype=dtype)
+        current = helper._from_unit(current_unit, axes)
+        current_log_p = helper._target_log_prob(current, axes, flat_log_density, cell_shape)
+
+        accepted = torch.zeros((), device=device, dtype=dtype)
+        proposed = torch.zeros((), device=device, dtype=dtype)
+        n_steps = max(0, int(burn_in)) + max(1, int(thin))
+
+        for _ in range(n_steps):
+            proposal_unit, proposal_log_q = flow.sample(n_events, device=device, dtype=dtype)
+            proposal = helper._from_unit(proposal_unit, axes)
+            proposal_log_p = helper._target_log_prob(proposal, axes, flat_log_density, cell_shape)
+            log_alpha = proposal_log_p + current_log_q - current_log_p - proposal_log_q
+            accept = torch.log(torch.rand(n_events, device=device, dtype=dtype)) < log_alpha.clamp_max(0)
+
+            current_unit = torch.where(accept.unsqueeze(-1), proposal_unit, current_unit)
+            current_log_p = torch.where(accept, proposal_log_p, current_log_p)
+            current_log_q = torch.where(accept, proposal_log_q, current_log_q)
+            accepted = accepted + accept.to(dtype).sum()
+            proposed = proposed + n_events
+
+    return (accepted / proposed.clamp_min(1)).detach().cpu().item()
+
+
 def run_dimension_sweep(args, device, dtype):
     rows = []
     ackley_max = compute_ackley_max()
@@ -405,21 +515,40 @@ def run_dimension_sweep(args, device, dtype):
             if device.type == "cuda":
                 torch.cuda.empty_cache()
             density, axes = make_sweep_grid(args, dim, device, dtype, ackley_max)
-            nf_sampler = NFMCMCND(
-                train_steps=args.sweep_train_steps,
-                train_samples=args.sweep_train_samples,
-                batch_size=args.batch_size,
-                flow_layers=args.flow_layers,
-                hidden_dim=args.hidden_dim,
-                burn_in=args.nf_burn_in,
-                thin=args.nf_thin,
-            )
-            _, nf_rate = nf_sampler.sample(
-                density,
-                axes,
-                args.sweep_events,
-                cache_key=("ackley-sweep", dim),
-            )
+            if args.nf_train_source == "notebook-loits":
+                train_unit = draw_notebook_style_loits_unit_samples(
+                    density,
+                    args.sweep_train_samples,
+                    grid_size=args.loits_grid_size,
+                )
+                nf_rate = nf_mcmc_acceptance_from_training_units(
+                    density,
+                    axes,
+                    args.sweep_events,
+                    train_unit,
+                    args.sweep_train_steps,
+                    args.batch_size,
+                    args.flow_layers,
+                    args.hidden_dim,
+                    args.nf_burn_in,
+                    args.nf_thin,
+                )
+            else:
+                nf_sampler = NFMCMCND(
+                    train_steps=args.sweep_train_steps,
+                    train_samples=args.sweep_train_samples,
+                    batch_size=args.batch_size,
+                    flow_layers=args.flow_layers,
+                    hidden_dim=args.hidden_dim,
+                    burn_in=args.nf_burn_in,
+                    thin=args.nf_thin,
+                )
+                _, nf_rate = nf_sampler.sample(
+                    density,
+                    axes,
+                    args.sweep_events,
+                    cache_key=("ackley-sweep", dim),
+                )
 
             loits_rate = notebook_style_loits_acceptance(
                 density,
@@ -436,6 +565,7 @@ def run_dimension_sweep(args, device, dtype):
                 "loits_mcmc_acceptance_rate": float(loits_rate),
                 "grid_n": args.sweep_grid_n,
                 "target": args.sweep_target,
+                "nf_train_source": args.nf_train_source,
             }
             rows.append(row)
             print(
@@ -454,6 +584,7 @@ def run_dimension_sweep(args, device, dtype):
                 "loits_mcmc_acceptance_rate": None,
                 "grid_n": args.sweep_grid_n,
                 "target": args.sweep_target,
+                "nf_train_source": args.nf_train_source,
                 "error": "CUDA out of memory",
             }
             rows.append(row)
@@ -493,6 +624,16 @@ def parse_args():
     parser.add_argument("--sweep-events", type=int, default=3000)
     parser.add_argument("--sweep-train-steps", type=int, default=250)
     parser.add_argument("--sweep-train-samples", type=int, default=4096)
+    parser.add_argument(
+        "--nf-train-source",
+        choices=["exact-its", "notebook-loits"],
+        default="exact-its",
+        help=(
+            "Training samples for the NF dimension sweep. exact-its uses direct samples from the "
+            "grid target; notebook-loits trains NF from the same approximate grid/cell LOITS "
+            "proposal family used by the high-dimensional LOITS notebook."
+        ),
+    )
     parser.add_argument(
         "--sweep-target",
         choices=["mean-ackley", "paired-ackley", "paired-two-moons", "chain-two-moons"],

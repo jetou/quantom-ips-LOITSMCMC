@@ -1,0 +1,47 @@
+[
+  {
+    "dim": 2,
+    "acceptance_rate": 0.22937500476837158,
+    "nf_mcmc_acceptance_rate": 0.22937500476837158,
+    "loits_mcmc_acceptance_rate": 0.944531261920929,
+    "grid_n": 5,
+    "target": "mean-ackley",
+    "nf_train_source": "notebook-loits"
+  },
+  {
+    "dim": 3,
+    "acceptance_rate": 0.2043749988079071,
+    "nf_mcmc_acceptance_rate": 0.2043749988079071,
+    "loits_mcmc_acceptance_rate": 0.7333984375,
+    "grid_n": 5,
+    "target": "mean-ackley",
+    "nf_train_source": "notebook-loits"
+  },
+  {
+    "dim": 4,
+    "acceptance_rate": 0.21937499940395355,
+    "nf_mcmc_acceptance_rate": 0.21937499940395355,
+    "loits_mcmc_acceptance_rate": 0.542187511920929,
+    "grid_n": 5,
+    "target": "mean-ackley",
+    "nf_train_source": "notebook-loits"
+  },
+  {
+    "dim": 5,
+    "acceptance_rate": 0.2657812535762787,
+    "nf_mcmc_acceptance_rate": 0.2657812535762787,
+    "loits_mcmc_acceptance_rate": 0.4124999940395355,
+    "grid_n": 5,
+    "target": "mean-ackley",
+    "nf_train_source": "notebook-loits"
+  },
+  {
+    "dim": 6,
+    "acceptance_rate": 0.26640623807907104,
+    "nf_mcmc_acceptance_rate": 0.26640623807907104,
+    "loits_mcmc_acceptance_rate": 0.3326171934604645,
+    "grid_n": 5,
+    "target": "mean-ackley",
+    "nf_train_source": "notebook-loits"
+  }
+]
