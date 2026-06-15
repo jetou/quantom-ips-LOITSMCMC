@@ -1,0 +1,52 @@
+{
+  "device": "cpu",
+  "n_events": 80,
+  "truth_acceptance_rate": 0.8222222222222222,
+  "nf_mcmc_acceptance_rate": 0.5820000171661377,
+  "raw_nf_js_to_truth": 0.684482840733946,
+  "nf_mcmc_js_to_truth": 0.6931471804899454,
+  "nf_train_steps": 1,
+  "nf_train_samples": 64,
+  "dimension_sweep": [
+    {
+      "dim": 2,
+      "acceptance_rate": 0.45750001072883606,
+      "nf_mcmc_acceptance_rate": 0.45750001072883606,
+      "loits_mcmc_acceptance_rate": 0.943554699420929,
+      "grid_n": 5,
+      "target": "mean-ackley"
+    },
+    {
+      "dim": 3,
+      "acceptance_rate": 0.6301562786102295,
+      "nf_mcmc_acceptance_rate": 0.6301562786102295,
+      "loits_mcmc_acceptance_rate": 0.742968738079071,
+      "grid_n": 5,
+      "target": "mean-ackley"
+    },
+    {
+      "dim": 4,
+      "acceptance_rate": 0.5028125047683716,
+      "nf_mcmc_acceptance_rate": 0.5028125047683716,
+      "loits_mcmc_acceptance_rate": 0.541015625,
+      "grid_n": 5,
+      "target": "mean-ackley"
+    },
+    {
+      "dim": 5,
+      "acceptance_rate": 0.5426562428474426,
+      "nf_mcmc_acceptance_rate": 0.5426562428474426,
+      "loits_mcmc_acceptance_rate": 0.42109376192092896,
+      "grid_n": 5,
+      "target": "mean-ackley"
+    },
+    {
+      "dim": 6,
+      "acceptance_rate": 0.4520312547683716,
+      "nf_mcmc_acceptance_rate": 0.4520312547683716,
+      "loits_mcmc_acceptance_rate": 0.34296876192092896,
+      "grid_n": 5,
+      "target": "mean-ackley"
+    }
+  ]
+}

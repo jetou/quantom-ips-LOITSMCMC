@@ -1,0 +1,42 @@
+[
+  {
+    "dim": 2,
+    "acceptance_rate": 0.4437499940395355,
+    "nf_mcmc_acceptance_rate": 0.4437499940395355,
+    "loits_mcmc_acceptance_rate": 0.78125,
+    "grid_n": 5,
+    "target": "chain-two-moons"
+  },
+  {
+    "dim": 3,
+    "acceptance_rate": 0.4712499976158142,
+    "nf_mcmc_acceptance_rate": 0.4712499976158142,
+    "loits_mcmc_acceptance_rate": 0.6507812738418579,
+    "grid_n": 5,
+    "target": "chain-two-moons"
+  },
+  {
+    "dim": 4,
+    "acceptance_rate": 0.35843750834465027,
+    "nf_mcmc_acceptance_rate": 0.35843750834465027,
+    "loits_mcmc_acceptance_rate": 0.569140613079071,
+    "grid_n": 5,
+    "target": "chain-two-moons"
+  },
+  {
+    "dim": 5,
+    "acceptance_rate": 0.43406251072883606,
+    "nf_mcmc_acceptance_rate": 0.43406251072883606,
+    "loits_mcmc_acceptance_rate": 0.51953125,
+    "grid_n": 5,
+    "target": "chain-two-moons"
+  },
+  {
+    "dim": 6,
+    "acceptance_rate": 0.30281248688697815,
+    "nf_mcmc_acceptance_rate": 0.30281248688697815,
+    "loits_mcmc_acceptance_rate": 0.46875,
+    "grid_n": 5,
+    "target": "chain-two-moons"
+  }
+]

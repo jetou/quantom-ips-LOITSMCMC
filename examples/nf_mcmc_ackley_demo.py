@@ -1,4 +1,5 @@
 import argparse
+import itertools
 import json
 import sys
 from pathlib import Path
@@ -224,13 +225,186 @@ def make_ackley_nd_grid(dim, grid_n, device, dtype):
     return density, axes
 
 
+def make_paired_ackley_nd_grid(dim, grid_n, device, dtype, ackley_max):
+    axes = [torch.linspace(R_MIN, R_MAX, grid_n, device=device, dtype=dtype) for _ in range(dim)]
+    grids = torch.meshgrid(*axes, indexing="ij")
+    density = torch.ones_like(grids[0])
+
+    for first in range(0, dim, 2):
+        x = grids[first]
+        y = grids[first + 1] if first + 1 < dim else torch.zeros_like(x)
+        z = (
+            -20.0 * torch.exp(-0.2 * torch.sqrt(0.5 * (x**2 + y**2)))
+            - torch.exp(0.5 * (torch.cos(2 * torch.pi * x) + torch.cos(2 * torch.pi * y)))
+            + torch.e
+            + 20.0
+        )
+        pair_density = torch.clamp(
+            torch.tensor(ackley_max, device=device, dtype=dtype) - z,
+            min=EPS,
+        )
+        density = density * pair_density
+
+    return density, axes
+
+
+def two_moons_weight_torch(x, y, dx=0.1, dy=0.1, w=0.1, radius=0.2, sigma=0.1):
+    x = (x - R_MIN) / (R_MAX - R_MIN)
+    y = (y - R_MIN) / (R_MAX - R_MIN)
+    x1 = 0.5 - dx
+    y1 = 0.5 + dy
+    x2 = 0.5 + dx
+    y2 = 0.5 - dy
+    r1 = torch.sqrt((x - x1) ** 2 + (y - y1) ** 2)
+    r2 = torch.sqrt((x - x2) ** 2 + (y - y2) ** 2)
+    gate1 = 0.5 * (1 + torch.tanh((y - y1) / w))
+    gate2 = 0.5 * (1 + torch.tanh((y2 - y) / w))
+    moon1 = torch.exp(-((r1 - radius) ** 2) / (2 * sigma**2)) * gate1
+    moon2 = torch.exp(-((r2 - radius) ** 2) / (2 * sigma**2)) * gate2
+    return moon1 + moon2 + EPS
+
+
+def make_paired_two_moons_nd_grid(dim, grid_n, device, dtype):
+    axes = [torch.linspace(R_MIN, R_MAX, grid_n, device=device, dtype=dtype) for _ in range(dim)]
+    grids = torch.meshgrid(*axes, indexing="ij")
+    density = torch.ones_like(grids[0])
+
+    for first in range(0, dim, 2):
+        x = grids[first]
+        y = grids[first + 1] if first + 1 < dim else torch.zeros_like(x)
+        density = density * two_moons_weight_torch(x, y)
+
+    return density, axes
+
+
+def make_chain_two_moons_nd_grid(dim, grid_n, device, dtype):
+    axes = [torch.linspace(R_MIN, R_MAX, grid_n, device=device, dtype=dtype) for _ in range(dim)]
+    grids = torch.meshgrid(*axes, indexing="ij")
+    density = torch.ones_like(grids[0])
+
+    for first in range(dim - 1):
+        density = density * two_moons_weight_torch(grids[first], grids[first + 1])
+
+    return density, axes
+
+
+def make_sweep_grid(args, dim, device, dtype, ackley_max):
+    if args.sweep_target == "chain-two-moons":
+        return make_chain_two_moons_nd_grid(dim, args.sweep_grid_n, device, dtype)
+    if args.sweep_target == "paired-two-moons":
+        return make_paired_two_moons_nd_grid(dim, args.sweep_grid_n, device, dtype)
+    if args.sweep_target == "paired-ackley":
+        return make_paired_ackley_nd_grid(dim, args.sweep_grid_n, device, dtype, ackley_max)
+    return make_ackley_nd_grid(dim, args.sweep_grid_n, device, dtype)
+
+
+def _coarse_slices(n_points, grid_size):
+    edges = torch.linspace(0, n_points, grid_size + 1, dtype=torch.long).tolist()
+    return [slice(int(edges[i]), int(edges[i + 1])) for i in range(grid_size)]
+
+
+def notebook_style_loits_acceptance(density, n_events, grid_size=2, burn_in=0, thin=1):
+    """Approximate the high-dimensional LOITS notebook acceptance experiment.
+
+    The high-dim notebook builds a coarse grid, proposes from per-cell 1D
+    conditional/slice inverse CDFs, then applies an independence MH correction.
+    This routine mirrors that structure on the tensor density used by the demo.
+    """
+    device, dtype = density.device, density.dtype
+    dim = density.ndim
+    eps = torch.finfo(dtype).tiny
+    grid_size = max(1, min(int(grid_size), min(density.shape)))
+    axis_slices = [_coarse_slices(density.shape[d], grid_size) for d in range(dim)]
+    cell_indices = list(itertools.product(range(grid_size), repeat=dim))
+
+    weights = []
+    cell_slices = []
+    for idx in cell_indices:
+        slices = tuple(axis_slices[d][idx[d]] for d in range(dim))
+        cell_slices.append(slices)
+        weights.append(density[slices].clamp_min(0).sum())
+    weights = torch.stack(weights)
+    if not torch.isfinite(weights).all() or weights.sum() <= 0:
+        weights = torch.ones_like(weights)
+    weights = weights / weights.sum()
+
+    assignments = torch.multinomial(weights, n_events, replacement=True)
+    counts = torch.bincount(assignments, minlength=len(cell_indices))
+
+    accepted = torch.zeros((), device=device, dtype=dtype)
+    proposed = torch.zeros((), device=device, dtype=dtype)
+    n_steps = max(0, int(burn_in)) + max(1, int(thin))
+
+    with torch.no_grad():
+        for cell_id, n_cell_t in enumerate(counts):
+            n_cell = int(n_cell_t.item())
+            if n_cell <= 0:
+                continue
+
+            slices = cell_slices[cell_id]
+            starts = [s.start for s in slices]
+            stops = [s.stop for s in slices]
+            sizes = [max(1, stop - start) for start, stop in zip(starts, stops)]
+            centers = [start + size // 2 for start, size in zip(starts, sizes)]
+
+            q_lines = []
+            for d in range(dim):
+                indexer = []
+                for axis in range(dim):
+                    if axis == d:
+                        indexer.append(slice(starts[axis], stops[axis]))
+                    else:
+                        indexer.append(centers[axis])
+                line = density[tuple(indexer)].clamp_min(eps)
+                line = line / line.sum().clamp_min(eps)
+                q_lines.append(line)
+
+            def notebook_log_q(indices):
+                log_q = torch.zeros(indices.shape[0], device=device, dtype=dtype)
+                for d in range(dim):
+                    center_indices = indices.clone()
+                    center_indices[:, d] = centers[d]
+                    log_q = log_q + torch.log(
+                        density[
+                            tuple(center_indices[:, axis] for axis in range(dim))
+                        ].clamp_min(eps)
+                    )
+                return log_q
+
+            def draw_from_q():
+                global_indices = []
+                for d, q_line in enumerate(q_lines):
+                    local = torch.multinomial(q_line, n_cell, replacement=True)
+                    global_indices.append(local + starts[d])
+                indices = torch.stack(global_indices, dim=-1)
+                log_p = torch.log(
+                    density[tuple(indices[:, d] for d in range(dim))].clamp_min(eps)
+                )
+                log_q = notebook_log_q(indices)
+                return indices, log_p, log_q
+
+            current, current_log_p, current_log_q = draw_from_q()
+            for _ in range(n_steps):
+                proposal, proposal_log_p, proposal_log_q = draw_from_q()
+                log_alpha = proposal_log_p + current_log_q - current_log_p - proposal_log_q
+                accept = torch.log(torch.rand(n_cell, device=device, dtype=dtype)) < log_alpha.clamp_max(0)
+                current = torch.where(accept.unsqueeze(-1), proposal, current)
+                current_log_p = torch.where(accept, proposal_log_p, current_log_p)
+                current_log_q = torch.where(accept, proposal_log_q, current_log_q)
+                accepted = accepted + accept.to(dtype).sum()
+                proposed = proposed + n_cell
+
+    return (accepted / proposed.clamp_min(1)).detach().cpu().item()
+
+
 def run_dimension_sweep(args, device, dtype):
     rows = []
+    ackley_max = compute_ackley_max()
     for dim in range(args.sweep_min_dim, args.sweep_max_dim + 1):
         try:
             if device.type == "cuda":
                 torch.cuda.empty_cache()
-            density, axes = make_ackley_nd_grid(dim, args.sweep_grid_n, device, dtype)
+            density, axes = make_sweep_grid(args, dim, device, dtype, ackley_max)
             nf_sampler = NFMCMCND(
                 train_steps=args.sweep_train_steps,
                 train_samples=args.sweep_train_samples,
@@ -247,12 +421,13 @@ def run_dimension_sweep(args, device, dtype):
                 cache_key=("ackley-sweep", dim),
             )
 
-            loits_sampler = MCMCLOITSND(
+            loits_rate = notebook_style_loits_acceptance(
+                density,
+                args.sweep_events,
+                grid_size=args.loits_grid_size,
                 burn_in=args.loits_burn_in,
                 thin=args.loits_thin,
-                step_radius=args.loits_step_radius,
             )
-            _, loits_rate = loits_sampler.sample(density, axes, args.sweep_events)
 
             row = {
                 "dim": dim,
@@ -260,6 +435,7 @@ def run_dimension_sweep(args, device, dtype):
                 "nf_mcmc_acceptance_rate": float(nf_rate),
                 "loits_mcmc_acceptance_rate": float(loits_rate),
                 "grid_n": args.sweep_grid_n,
+                "target": args.sweep_target,
             }
             rows.append(row)
             print(
@@ -277,6 +453,7 @@ def run_dimension_sweep(args, device, dtype):
                 "nf_mcmc_acceptance_rate": None,
                 "loits_mcmc_acceptance_rate": None,
                 "grid_n": args.sweep_grid_n,
+                "target": args.sweep_target,
                 "error": "CUDA out of memory",
             }
             rows.append(row)
@@ -308,6 +485,7 @@ def parse_args():
     parser.add_argument("--loits-burn-in", type=int, default=16)
     parser.add_argument("--loits-thin", type=int, default=4)
     parser.add_argument("--loits-step-radius", type=int, default=1)
+    parser.add_argument("--loits-grid-size", type=int, default=2)
     parser.add_argument("--run-sweep", action="store_true")
     parser.add_argument("--sweep-min-dim", type=int, default=2)
     parser.add_argument("--sweep-max-dim", type=int, default=8)
@@ -315,6 +493,17 @@ def parse_args():
     parser.add_argument("--sweep-events", type=int, default=3000)
     parser.add_argument("--sweep-train-steps", type=int, default=250)
     parser.add_argument("--sweep-train-samples", type=int, default=4096)
+    parser.add_argument(
+        "--sweep-target",
+        choices=["mean-ackley", "paired-ackley", "paired-two-moons", "chain-two-moons"],
+        default="mean-ackley",
+        help=(
+            "Target used only for dimension sweeps. mean-ackley is the standard D-dimensional "
+            "Ackley average; paired-ackley repeats the 2D Ackley structure across dimension pairs; "
+            "paired-two-moons repeats the two-moon target from the LOITS notebook across pairs; "
+            "chain-two-moons links adjacent dimensions with two-moon factors."
+        ),
+    )
     return parser.parse_args()
 
 

@@ -1,0 +1,34 @@
+[
+  {
+    "dim": 2,
+    "acceptance_rate": 0.5090625286102295,
+    "nf_mcmc_acceptance_rate": 0.5090625286102295,
+    "loits_mcmc_acceptance_rate": 0.982421875,
+    "grid_n": 4,
+    "target": "paired-ackley"
+  },
+  {
+    "dim": 3,
+    "acceptance_rate": 0.5409374833106995,
+    "nf_mcmc_acceptance_rate": 0.5409374833106995,
+    "loits_mcmc_acceptance_rate": 0.98046875,
+    "grid_n": 4,
+    "target": "paired-ackley"
+  },
+  {
+    "dim": 4,
+    "acceptance_rate": 0.48249998688697815,
+    "nf_mcmc_acceptance_rate": 0.48249998688697815,
+    "loits_mcmc_acceptance_rate": 0.977343738079071,
+    "grid_n": 4,
+    "target": "paired-ackley"
+  },
+  {
+    "dim": 5,
+    "acceptance_rate": 0.5118749737739563,
+    "nf_mcmc_acceptance_rate": 0.5118749737739563,
+    "loits_mcmc_acceptance_rate": 0.975781261920929,
+    "grid_n": 4,
+    "target": "paired-ackley"
+  }
+]
