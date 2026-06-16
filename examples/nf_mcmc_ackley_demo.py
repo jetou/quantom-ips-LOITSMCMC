@@ -7,6 +7,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from scipy.interpolate import interp1d, RegularGridInterpolator
+from scipy.ndimage import gaussian_filter
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SRC_ROOT = REPO_ROOT / "src"
@@ -507,6 +509,309 @@ def nf_mcmc_acceptance_from_training_units(
     return (accepted / proposed.clamp_min(1)).detach().cpu().item()
 
 
+# ======================================================================
+# Faithful port of the high-dimensional LOITS notebook
+# (Loits-gridHighdim-Copy1.ipynb :: LOITS_ND.mcmc_correction_by_grid).
+#
+# The original notebook_style_loits_acceptance() above is a coarse, fully
+# discrete stand-in: it proposes from a multinomial over only the few grid
+# points inside each coarse cell, which severely under-estimates the LOITS
+# acceptance and collapses much faster with dimension than the real notebook.
+#
+# This port reproduces the notebook algorithm step-for-step on a *continuous*
+# density: per-cell proposals come from 100-point inverse CDFs of a
+# reconstructed (smoothed-histogram) density, and the Metropolis ratio uses the
+# true continuous target for p and the product-of-cell-center marginals for q.
+# pdf evaluations are vectorized (identical numbers, faster); the per-proposal
+# accept step stays sequential exactly like the notebook.
+# ======================================================================
+def _mean_ackley_np(points, a=20.0, b=0.2, c=2 * np.pi):
+    sq = np.mean(points ** 2, axis=1)
+    co = np.mean(np.cos(c * points), axis=1)
+    return -a * np.exp(-b * np.sqrt(sq)) - np.exp(co) + a + np.e
+
+
+def _ackley2d_np(x, y):
+    return (
+        -20.0 * np.exp(-0.2 * np.sqrt(0.5 * (x ** 2 + y ** 2)))
+        - np.exp(0.5 * (np.cos(2 * np.pi * x) + np.cos(2 * np.pi * y)))
+        + 20.0
+        + np.e
+    )
+
+
+def _two_moons_np(x, y, dx=0.1, dy=0.1, w=0.1, radius=0.2, sigma=0.1):
+    x = (x - R_MIN) / (R_MAX - R_MIN)
+    y = (y - R_MIN) / (R_MAX - R_MIN)
+    x1, y1, x2, y2 = 0.5 - dx, 0.5 + dy, 0.5 + dx, 0.5 - dy
+    r1 = np.sqrt((x - x1) ** 2 + (y - y1) ** 2)
+    r2 = np.sqrt((x - x2) ** 2 + (y - y2) ** 2)
+    g1 = 0.5 * (1 + np.tanh((y - y1) / w))
+    g2 = 0.5 * (1 + np.tanh((y2 - y) / w))
+    return (
+        np.exp(-((r1 - radius) ** 2) / (2 * sigma ** 2)) * g1
+        + np.exp(-((r2 - radius) ** 2) / (2 * sigma ** 2)) * g2
+        + EPS
+    )
+
+
+def _make_target_density_fn(target, dim, ackley_max):
+    """Continuous non-negative density f(points (N,dim)) -> (N,) for each sweep target."""
+    eps = 1e-8
+    if target == "mean-ackley":
+        corners = np.array(
+            [[R_MAX] * dim, [R_MIN] * dim, [R_MIN if i % 2 else R_MAX for i in range(dim)]]
+        )
+        amax = float(_mean_ackley_np(corners).max()) + 1.0
+
+        def fn(p):
+            return np.clip(amax - _mean_ackley_np(p), eps, None)
+
+        return fn
+    if target == "paired-ackley":
+        def fn(p):
+            d = np.ones(p.shape[0])
+            for f in range(0, dim, 2):
+                x = p[:, f]
+                y = p[:, f + 1] if f + 1 < dim else np.zeros_like(x)
+                d = d * np.clip(ackley_max - _ackley2d_np(x, y), eps, None)
+            return d
+
+        return fn
+    if target == "paired-two-moons":
+        def fn(p):
+            d = np.ones(p.shape[0])
+            for f in range(0, dim, 2):
+                x = p[:, f]
+                y = p[:, f + 1] if f + 1 < dim else np.zeros_like(x)
+                d = d * _two_moons_np(x, y)
+            return d
+
+        return fn
+    if target == "chain-two-moons":
+        def fn(p):
+            d = np.ones(p.shape[0])
+            for f in range(dim - 1):
+                d = d * _two_moons_np(p[:, f], p[:, f + 1])
+            return d
+
+        return fn
+    raise ValueError(f"Unknown target for faithful LOITS: {target}")
+
+
+class _NotebookFaithfulLOITS:
+    """Step-for-step port of the notebook LOITS_ND high-dim algorithm."""
+
+    def __init__(self, dim, bounds, density_fn, grid_size=2):
+        self.dims = dim
+        self.grid_size = grid_size
+        self.bounds = bounds
+        self.density_fn = density_fn
+        # notebook point/bin schedule (LOITS_ND.__init__)
+        self.grid_points = 10
+        self.bins = 20
+        if dim < 5:
+            self.pdf_points = 100
+        elif dim == 5:
+            self.pdf_points = 50
+        else:
+            self.pdf_points = max(5, int(100 / (2 ** (dim - 4))))
+            self.grid_points = max(2, 10 - (dim - 1))
+            self.bins = max(5, 20 - 2 * (dim - 1))
+        lo, hi = bounds
+        self.grid_edges = [np.linspace(lo, hi, grid_size + 1) for _ in range(dim)]
+
+    def pdf(self, points):
+        return self.density_fn(np.atleast_2d(points))
+
+    def initialize_distribution(self):
+        lo, hi = self.bounds
+        n = self.pdf_points
+        axis = np.linspace(lo, hi, n)
+        Z = np.empty([n] * self.dims, dtype=np.float32)
+        if self.dims == 1:
+            Z[:] = self.density_fn(axis.reshape(-1, 1))
+        else:
+            # evaluate slice-by-slice over axis 0 to cap peak memory in high dim
+            sub_mesh = np.meshgrid(*([axis] * (self.dims - 1)), indexing="ij")
+            sub_flat = np.column_stack([m.ravel() for m in sub_mesh])
+            block = np.empty((sub_flat.shape[0], self.dims), dtype=np.float64)
+            block[:, 1:] = sub_flat
+            for i in range(n):
+                block[:, 0] = axis[i]
+                Z[i] = self.density_fn(block).reshape([n] * (self.dims - 1))
+        self.normal_c = float(np.sum(Z))
+        self.probabilities = (Z / self.normal_c).astype(np.float64)
+
+    def compute_initial_cdfs(self):
+        ppd = self.probabilities.shape[0]
+        step = ppd // self.grid_size
+        self.cell_cdfs = [
+            np.zeros([self.grid_size] * self.dims, dtype=object) for _ in range(self.dims)
+        ]
+        for idx in itertools.product(*[range(self.grid_size) for _ in range(self.dims)]):
+            bounds = [
+                (self.grid_edges[d][idx[d]], self.grid_edges[d][idx[d] + 1]) for d in range(self.dims)
+            ]
+            slices = tuple(slice(i * step, (i + 1) * step) for i in idx)
+            cell_probs = self.probabilities[slices]
+            for d in range(self.dims):
+                axes = tuple(i for i in range(self.dims) if i != d)
+                p = np.sum(cell_probs, axis=axes)
+                if np.sum(p) > 0:
+                    p = p / np.sum(p)
+                    cdf = np.cumsum(p)
+                    cdf /= cdf[-1]
+                    coords = np.linspace(bounds[d][0], bounds[d][1], len(cdf))
+                    self.cell_cdfs[d][idx] = interp1d(
+                        cdf, coords, kind="linear", bounds_error=False,
+                        fill_value=(bounds[d][0], bounds[d][1]),
+                    )
+                else:
+                    s, e = bounds[d]
+                    self.cell_cdfs[d][idx] = (lambda u, s=s, e=e: s + u * (e - s))
+
+    def calculate_grid_weights(self):
+        gw = np.zeros([self.grid_size] * self.dims)
+        for idx in itertools.product(*[range(self.grid_size) for _ in range(self.dims)]):
+            bounds = [
+                (self.grid_edges[d][idx[d]], self.grid_edges[d][idx[d] + 1]) for d in range(self.dims)
+            ]
+            pts = [np.linspace(b[0], b[1], self.grid_points) for b in bounds]
+            mesh = np.meshgrid(*pts, indexing="ij")
+            flat = np.column_stack([m.ravel() for m in mesh])
+            dens = self.pdf(flat)
+            dx = [(b[1] - b[0]) / (self.grid_points - 1) for b in bounds]
+            gw[idx] = np.sum(dens) * np.prod(dx)
+        tot = np.sum(gw)
+        if tot > 0:
+            gw = gw / tot
+        return gw
+
+    def generate_initial_samples(self, n_samples):
+        gw = self.calculate_grid_weights()
+        cnt = np.round(gw * n_samples).astype(int)
+        diff = n_samples - int(np.sum(cnt))
+        if diff > 0:
+            cnt[np.unravel_index(np.argmax(gw), gw.shape)] += diff
+        samples = []
+        for idx in itertools.product(*[range(self.grid_size) for _ in range(self.dims)]):
+            n = cnt[idx]
+            if n > 0:
+                cs = np.zeros((n, self.dims))
+                for d in range(self.dims):
+                    cs[:, d] = self.cell_cdfs[d][idx](np.random.random(n))
+                samples.extend(cs)
+        return np.array(samples)
+
+    def get_reconstructed_density(self, samples):
+        lo, hi = self.bounds
+        bins = [np.linspace(lo, hi, self.bins + 1) for _ in range(self.dims)]
+        H, edges = np.histogramdd(samples, bins=bins)
+        sigma = max(0.5, 1.0 / np.sqrt(self.dims))
+        H = gaussian_filter(H, sigma=sigma)
+        bin_vol = np.prod([(edges[i][1] - edges[i][0]) for i in range(self.dims)])
+        density = H / (np.sum(H) * bin_vol)
+        centers = [0.5 * (edges[i][1:] + edges[i][:-1]) for i in range(self.dims)]
+        f = RegularGridInterpolator(
+            centers, density, method="linear", bounds_error=False, fill_value=0
+        )
+        return lambda pts: f(np.atleast_2d(pts))
+
+    def _marginal_invcdf(self, recon, centers, target_dim, bounds, n_points=100):
+        sp = [
+            np.linspace(bounds[d][0], bounds[d][1], n_points)
+            if d == target_dim
+            else np.array([centers[d]])
+            for d in range(self.dims)
+        ]
+        mesh = np.meshgrid(*sp, indexing="ij")
+        pts = np.column_stack([m.ravel() for m in mesh])
+        dv = recon(pts)
+        if np.all(dv == 0):
+            lo, hi = bounds[target_dim]
+            return (lambda u, lo=lo, hi=hi: lo + u * (hi - lo))
+        cdf = np.cumsum(dv)
+        if cdf[-1] > 0:
+            cdf = cdf / cdf[-1]
+        return interp1d(
+            cdf, sp[target_dim], kind="linear", bounds_error=False,
+            fill_value=(bounds[target_dim][0], bounds[target_dim][1]),
+        )
+
+    def mcmc_correction_by_grid(self, recon, n_samples):
+        eps = 1e-10
+        gw = self.calculate_grid_weights()
+        cnt = np.round(gw * n_samples).astype(int)
+        diff = n_samples - int(np.sum(cnt))
+        if diff > 0:
+            cnt[np.unravel_index(np.argmax(gw), gw.shape)] += diff
+        total_acc = 0
+        total_att = 0
+        for idx in itertools.product(*[range(self.grid_size) for _ in range(self.dims)]):
+            spg = int(cnt[idx])
+            if spg == 0:
+                continue
+            bounds = [
+                (self.grid_edges[d][idx[d]], self.grid_edges[d][idx[d] + 1]) for d in range(self.dims)
+            ]
+            centers = [(b[0] + b[1]) / 2 for b in bounds]
+            margin = [self._marginal_invcdf(recon, centers, d, bounds, 100) for d in range(self.dims)]
+
+            current = None
+            for _ in range(100):
+                cand = np.array([np.random.uniform(b[0], b[1]) for b in bounds])
+                if float(self.pdf(cand)[0]) > 0:
+                    current = cand
+                    break
+            if current is None:
+                continue
+            curr_p = float(self.pdf(current)[0])
+            curr_q = 1.0
+            for d in range(self.dims):
+                cp = current.copy()
+                cp[d] = centers[d]
+                curr_q *= (float(self.pdf(cp)[0]) + eps)
+
+            props = np.zeros((spg, self.dims))
+            for d in range(self.dims):
+                props[:, d] = margin[d](np.random.random(spg))
+            prop_p = self.pdf(props) + eps
+            prop_q = np.ones(spg)
+            for d in range(self.dims):
+                sub = props.copy()
+                sub[:, d] = centers[d]
+                prop_q *= (self.pdf(sub) + eps)
+            rnd = np.random.random(spg)
+            accepts = 0
+            for k in range(spg):
+                ratio = min(1.0, (prop_p[k] * curr_q) / (curr_p * prop_q[k]))
+                if rnd[k] < ratio:
+                    if all(bounds[d][0] <= props[k, d] <= bounds[d][1] for d in range(self.dims)):
+                        curr_p = prop_p[k]
+                        curr_q = prop_q[k]
+                        accepts += 1
+            total_acc += accepts
+            total_att += spg
+        return total_acc / max(total_att, 1)
+
+    def run(self, n_init, mcmc_samples):
+        self.initialize_distribution()
+        self.compute_initial_cdfs()
+        init = self.generate_initial_samples(n_init)
+        recon = self.get_reconstructed_density(init)
+        return self.mcmc_correction_by_grid(recon, mcmc_samples)
+
+
+def notebook_faithful_loits_acceptance(
+    target, dim, ackley_max, n_events, grid_size=2, n_init=200000
+):
+    """LOITS acceptance via the faithful notebook port (continuous proposals)."""
+    density_fn = _make_target_density_fn(target, dim, ackley_max)
+    loits = _NotebookFaithfulLOITS(dim, (R_MIN, R_MAX), density_fn, grid_size=grid_size)
+    return float(loits.run(n_init=n_init, mcmc_samples=n_events))
+
+
 def run_dimension_sweep(args, device, dtype):
     rows = []
     ackley_max = compute_ackley_max()
@@ -550,13 +855,23 @@ def run_dimension_sweep(args, device, dtype):
                     cache_key=("ackley-sweep", dim),
                 )
 
-            loits_rate = notebook_style_loits_acceptance(
-                density,
-                args.sweep_events,
-                grid_size=args.loits_grid_size,
-                burn_in=args.loits_burn_in,
-                thin=args.loits_thin,
-            )
+            if args.loits_impl == "faithful":
+                loits_rate = notebook_faithful_loits_acceptance(
+                    args.sweep_target,
+                    dim,
+                    ackley_max,
+                    args.sweep_events,
+                    grid_size=args.loits_grid_size,
+                    n_init=args.loits_init_samples,
+                )
+            else:
+                loits_rate = notebook_style_loits_acceptance(
+                    density,
+                    args.sweep_events,
+                    grid_size=args.loits_grid_size,
+                    burn_in=args.loits_burn_in,
+                    thin=args.loits_thin,
+                )
 
             row = {
                 "dim": dim,
@@ -617,6 +932,22 @@ def parse_args():
     parser.add_argument("--loits-thin", type=int, default=4)
     parser.add_argument("--loits-step-radius", type=int, default=1)
     parser.add_argument("--loits-grid-size", type=int, default=2)
+    parser.add_argument(
+        "--loits-impl",
+        choices=["faithful", "discrete"],
+        default="faithful",
+        help=(
+            "LOITS acceptance implementation for the sweep. 'faithful' ports the "
+            "high-dimensional LOITS notebook (continuous per-cell inverse-CDF proposals); "
+            "'discrete' is the old coarse grid-index stand-in that collapses too fast."
+        ),
+    )
+    parser.add_argument(
+        "--loits-init-samples",
+        type=int,
+        default=200000,
+        help="Initial samples used to reconstruct the density for the faithful LOITS port.",
+    )
     parser.add_argument("--run-sweep", action="store_true")
     parser.add_argument("--sweep-min-dim", type=int, default=2)
     parser.add_argument("--sweep-max-dim", type=int, default=8)
