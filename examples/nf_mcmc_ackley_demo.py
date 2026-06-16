@@ -559,10 +559,17 @@ def _make_target_density_fn(target, dim, ackley_max):
     """Continuous non-negative density f(points (N,dim)) -> (N,) for each sweep target."""
     eps = 1e-8
     if target == "mean-ackley":
+        # density = amax - ackley, so amax MUST be >= max(ackley) over the box or
+        # the true density gets truncated. The Ackley maximum sits near half-integer
+        # coordinates (cos(2*pi*x) = -1), NOT the integer corners (cos = +1), so a
+        # corners-only estimate is too small. Scan the diagonal (which passes through
+        # those half-integer points) plus the corners for a safe estimate.
+        t = np.linspace(R_MIN, R_MAX, 1001)
+        diag = np.repeat(t[:, None], dim, axis=1)
         corners = np.array(
             [[R_MAX] * dim, [R_MIN] * dim, [R_MIN if i % 2 else R_MAX for i in range(dim)]]
         )
-        amax = float(_mean_ackley_np(corners).max()) + 1.0
+        amax = float(max(_mean_ackley_np(diag).max(), _mean_ackley_np(corners).max())) + 1.0
 
         def fn(p):
             return np.clip(amax - _mean_ackley_np(p), eps, None)
