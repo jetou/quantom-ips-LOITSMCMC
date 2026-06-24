@@ -1,0 +1,83 @@
+[
+  {
+    "dim": 2,
+    "acceptance_rate": 0.8940432071685791,
+    "nf_mcmc_acceptance_rate": 0.8940432071685791,
+    "loits_mcmc_acceptance_rate": 0.9023129940032959,
+    "grid_n": 6,
+    "target": "paired-ackley",
+    "nf_train_source": "exact-its"
+  },
+  {
+    "dim": 3,
+    "acceptance_rate": 0.874183177947998,
+    "nf_mcmc_acceptance_rate": 0.874183177947998,
+    "loits_mcmc_acceptance_rate": 0.767826497554779,
+    "grid_n": 6,
+    "target": "paired-ackley",
+    "nf_train_source": "exact-its"
+  },
+  {
+    "dim": 4,
+    "acceptance_rate": 0.8305531740188599,
+    "nf_mcmc_acceptance_rate": 0.8305531740188599,
+    "loits_mcmc_acceptance_rate": 0.49790850281715393,
+    "grid_n": 6,
+    "target": "paired-ackley",
+    "nf_train_source": "exact-its"
+  },
+  {
+    "dim": 5,
+    "acceptance_rate": 0.8024303913116455,
+    "nf_mcmc_acceptance_rate": 0.8024303913116455,
+    "loits_mcmc_acceptance_rate": 0.3301694989204407,
+    "grid_n": 6,
+    "target": "paired-ackley",
+    "nf_train_source": "exact-its"
+  },
+  {
+    "dim": 6,
+    "acceptance_rate": 0.7669039964675903,
+    "nf_mcmc_acceptance_rate": 0.7669039964675903,
+    "loits_mcmc_acceptance_rate": 0.24202699959278107,
+    "grid_n": 6,
+    "target": "paired-ackley",
+    "nf_train_source": "exact-its"
+  },
+  {
+    "dim": 7,
+    "acceptance_rate": 0.737714409828186,
+    "nf_mcmc_acceptance_rate": 0.737714409828186,
+    "loits_mcmc_acceptance_rate": 0.2035064995288849,
+    "grid_n": 6,
+    "target": "paired-ackley",
+    "nf_train_source": "exact-its"
+  },
+  {
+    "dim": 8,
+    "acceptance_rate": 0.6970452070236206,
+    "nf_mcmc_acceptance_rate": 0.6970452070236206,
+    "loits_mcmc_acceptance_rate": 0.18105550110340118,
+    "grid_n": 6,
+    "target": "paired-ackley",
+    "nf_train_source": "exact-its"
+  },
+  {
+    "dim": 9,
+    "acceptance_rate": 0.6764643788337708,
+    "nf_mcmc_acceptance_rate": 0.6764643788337708,
+    "loits_mcmc_acceptance_rate": 0.16856150329113007,
+    "grid_n": 6,
+    "target": "paired-ackley",
+    "nf_train_source": "exact-its"
+  },
+  {
+    "dim": 10,
+    "acceptance_rate": 0.644048810005188,
+    "nf_mcmc_acceptance_rate": 0.644048810005188,
+    "loits_mcmc_acceptance_rate": 0.16080400347709656,
+    "grid_n": 6,
+    "target": "paired-ackley",
+    "nf_train_source": "exact-its"
+  }
+]

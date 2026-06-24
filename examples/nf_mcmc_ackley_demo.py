@@ -108,12 +108,12 @@ def js_divergence(p, q, eps=1e-12):
     return float(0.5 * (kl_pm + kl_qm))
 
 
-def plot_2d_comparison(truth, corrected, raw_nf, acceptance_rate, outpath, bins=120):
+def plot_2d_comparison(truth, corrected, raw_samples, acceptance_rate, outpath, method_name="NF", bins=120):
     fig, axes = plt.subplots(1, 3, figsize=(13, 3.9), constrained_layout=True)
     panels = [
         ("MCMC reference", truth),
-        (f"NF-MCMC correction\nacceptance={acceptance_rate:.3f}", corrected),
-        ("Raw NF proposal", raw_nf),
+        (f"{method_name}-MCMC correction\nacceptance={acceptance_rate:.3f}", corrected),
+        (f"Raw {method_name} proposal", raw_samples),
     ]
     for ax, (title, samples) in zip(axes, panels):
         ax.hist2d(
@@ -132,7 +132,7 @@ def plot_2d_comparison(truth, corrected, raw_nf, acceptance_rate, outpath, bins=
     plt.close(fig)
 
 
-def plot_marginals(truth, corrected, raw_nf, outpath, bins=80):
+def plot_marginals(truth, corrected, raw_samples, outpath, method_name="NF", bins=80):
     fig, axs = plt.subplots(2, 2, figsize=(10, 7), constrained_layout=True)
     labels = ["x", "y"]
     for dim in range(2):
@@ -150,11 +150,11 @@ def plot_marginals(truth, corrected, raw_nf, outpath, bins=80):
             bins=bins,
             range=(R_MIN, R_MAX),
             histtype="step",
-            label="NF-MCMC correction",
+            label=f"{method_name}-MCMC correction",
             color="tab:orange",
             linewidth=1.5,
         )
-        axs[0, dim].set_title(f"Correction vs truth - {labels[dim]} marginal")
+        axs[0, dim].set_title(f"{method_name}-MCMC correction vs truth - {labels[dim]} marginal")
         axs[0, dim].legend()
 
         axs[1, dim].hist(
@@ -167,16 +167,97 @@ def plot_marginals(truth, corrected, raw_nf, outpath, bins=80):
             linewidth=1.8,
         )
         axs[1, dim].hist(
-            raw_nf[:, dim],
+            raw_samples[:, dim],
             bins=bins,
             range=(R_MIN, R_MAX),
             histtype="step",
-            label="Raw NF",
+            label=f"Raw {method_name}",
             color="tab:orange",
             linewidth=1.5,
         )
-        axs[1, dim].set_title(f"Raw NF vs truth - {labels[dim]} marginal")
+        axs[1, dim].set_title(f"Raw {method_name} vs truth - {labels[dim]} marginal")
         axs[1, dim].legend()
+    fig.savefig(outpath, dpi=180)
+    plt.close(fig)
+
+
+def plot_corrected_sampler_marginals(truth, nf_corrected, loits_corrected, outpath, bins=80):
+    fig, axes = plt.subplots(1, 2, figsize=(10, 3.8), constrained_layout=True)
+    for dim, (ax, label) in enumerate(zip(axes, ["x", "y"])):
+        for samples, color, name in [
+            (truth, "tab:blue", "MCMC reference"),
+            (nf_corrected, "tab:orange", "NF-MCMC correction"),
+            (loits_corrected, "tab:green", "LOITS-MCMC correction"),
+        ]:
+            ax.hist(
+                samples[:, dim],
+                bins=bins,
+                range=(R_MIN, R_MAX),
+                histtype="step",
+                label=name,
+                color=color,
+                linewidth=1.8,
+            )
+        ax.set_title(f"Corrected samplers vs truth - {label} marginal")
+        ax.set_xlabel(label)
+        ax.set_ylabel("count")
+        ax.legend(fontsize=8)
+    fig.savefig(outpath, dpi=180)
+    plt.close(fig)
+
+
+def plot_nf_loits_2d_comparison(
+    truth,
+    raw_nf,
+    nf_corrected,
+    nf_acceptance,
+    raw_loits,
+    loits_corrected,
+    loits_acceptance,
+    outpath,
+    bins=120,
+):
+    fig, axes = plt.subplots(2, 3, figsize=(13, 7.6), constrained_layout=True)
+    rows = [
+        (
+            "NF proposal and correction",
+            [
+                ("MCMC reference", truth),
+                ("Raw NF proposal", raw_nf),
+                (f"NF-MCMC correction\nacceptance={nf_acceptance:.3f}", nf_corrected),
+            ],
+        ),
+        (
+            "LOITS proposal and correction",
+            [
+                ("MCMC reference", truth),
+                ("Raw LOITS proposal", raw_loits),
+                (f"LOITS-MCMC correction\nacceptance={loits_acceptance:.3f}", loits_corrected),
+            ],
+        ),
+    ]
+    for row_index, (row_title, panels) in enumerate(rows):
+        for ax, (title, samples) in zip(axes[row_index], panels):
+            ax.hist2d(
+                samples[:, 0],
+                samples[:, 1],
+                bins=bins,
+                range=[[R_MIN, R_MAX], [R_MIN, R_MAX]],
+                cmap="viridis",
+            )
+            ax.set_title(title)
+            ax.set_xlabel("x")
+            ax.set_ylabel("y")
+        axes[row_index, 0].annotate(
+            row_title,
+            xy=(-0.18, 0.5),
+            xycoords="axes fraction",
+            rotation=90,
+            va="center",
+            ha="center",
+            fontsize=11,
+            fontweight="bold",
+        )
     fig.savefig(outpath, dpi=180)
     plt.close(fig)
 
@@ -1034,16 +1115,33 @@ def main():
     corrected = corrected_t.detach().cpu().numpy()
     print(f"NF-MCMC correction acceptance: {nf_acc:.3f}")
 
+    print("Drawing LOITS proposals and running LOITS-MCMC correction...")
+    loits_sampler = MCMCLOITSND(
+        burn_in=args.loits_burn_in,
+        thin=args.loits_thin,
+        step_radius=args.loits_step_radius,
+    )
+    with torch.no_grad():
+        raw_loits = loits_sampler.propose(density, axes, args.n_events).detach().cpu().numpy()
+    loits_corrected_t, loits_acc = loits_sampler.sample(density, axes, args.n_events)
+    loits_corrected = loits_corrected_t.detach().cpu().numpy()
+    print(f"LOITS-MCMC correction acceptance: {loits_acc:.3f}")
+
     truth_prob = hist_prob(truth)
     raw_prob = hist_prob(raw_nf)
     corrected_prob = hist_prob(corrected)
+    raw_loits_prob = hist_prob(raw_loits)
+    loits_corrected_prob = hist_prob(loits_corrected)
     metrics = {
         "device": str(device),
         "n_events": args.n_events,
         "truth_acceptance_rate": float(truth_acc),
         "nf_mcmc_acceptance_rate": float(nf_acc),
+        "loits_mcmc_acceptance_rate": float(loits_acc),
         "raw_nf_js_to_truth": js_divergence(truth_prob, raw_prob),
         "nf_mcmc_js_to_truth": js_divergence(truth_prob, corrected_prob),
+        "raw_loits_js_to_truth": js_divergence(truth_prob, raw_loits_prob),
+        "loits_mcmc_js_to_truth": js_divergence(truth_prob, loits_corrected_prob),
         "nf_train_steps": args.nf_train_steps,
         "nf_train_samples": args.nf_train_samples,
     }
@@ -1051,8 +1149,41 @@ def main():
     np.save(outdir / "mcmc_reference_samples.npy", truth)
     np.save(outdir / "raw_nf_samples.npy", raw_nf)
     np.save(outdir / "nf_mcmc_samples.npy", corrected)
+    np.save(outdir / "raw_loits_samples.npy", raw_loits)
+    np.save(outdir / "loits_mcmc_samples.npy", loits_corrected)
     plot_2d_comparison(truth, corrected, raw_nf, nf_acc, outdir / "ackley_nf_mcmc_2d_comparison.png")
     plot_marginals(truth, corrected, raw_nf, outdir / "ackley_nf_mcmc_marginals.png")
+    plot_2d_comparison(
+        truth,
+        loits_corrected,
+        raw_loits,
+        loits_acc,
+        outdir / "ackley_loits_mcmc_2d_comparison.png",
+        method_name="LOITS",
+    )
+    plot_marginals(
+        truth,
+        loits_corrected,
+        raw_loits,
+        outdir / "ackley_loits_mcmc_marginals.png",
+        method_name="LOITS",
+    )
+    plot_corrected_sampler_marginals(
+        truth,
+        corrected,
+        loits_corrected,
+        outdir / "ackley_nf_loits_corrected_marginals.png",
+    )
+    plot_nf_loits_2d_comparison(
+        truth,
+        raw_nf,
+        corrected,
+        nf_acc,
+        raw_loits,
+        loits_corrected,
+        loits_acc,
+        outdir / "ackley_nf_loits_before_after_2d.png",
+    )
 
     if args.run_sweep:
         sweep = run_dimension_sweep(args, device, dtype)

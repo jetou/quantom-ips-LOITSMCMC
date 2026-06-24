@@ -1,0 +1,13 @@
+{
+  "device": "cpu",
+  "n_events": 500,
+  "truth_acceptance_rate": 0.8766666666666667,
+  "nf_mcmc_acceptance_rate": 0.4873333275318146,
+  "loits_mcmc_acceptance_rate": 0.9459999799728394,
+  "raw_nf_js_to_truth": 0.6862157083433458,
+  "nf_mcmc_js_to_truth": 0.6671473853392581,
+  "raw_loits_js_to_truth": 0.6619420059698693,
+  "loits_mcmc_js_to_truth": 0.6577831228890096,
+  "nf_train_steps": 2,
+  "nf_train_samples": 256
+}

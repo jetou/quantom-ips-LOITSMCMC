@@ -111,6 +111,35 @@ class MCMCLOITSND(StatefulModule):
             rem = rem % stride
         return torch.stack(coords, dim=-1)
 
+    def _indices_to_coordinates(self, indices, grid_list):
+        n_events = indices.shape[0]
+        device, dtype = grid_list[0].device, grid_list[0].dtype
+        coords = []
+        for dim, grid in enumerate(grid_list):
+            idx = indices[:, dim]
+            lo = grid[idx]
+            hi = grid[idx + 1]
+            u = torch.rand(n_events, device=device, dtype=dtype)
+            coords.append(lo + u * (hi - lo))
+        return torch.stack(coords, dim=-1)
+
+    def propose(self, A, grid_list, n_events):
+        """Draw uncorrected LOITS proposal samples from the product-marginal proposal."""
+        device, dtype = A.device, A.dtype
+        grid_list = [grid.to(device=device, dtype=dtype) for grid in grid_list]
+        if A.ndim != len(grid_list):
+            raise ValueError(
+                f"MCMCLOITSND density ndim {A.ndim} does not match {len(grid_list)} grid axes"
+            )
+        for axis, grid in enumerate(grid_list):
+            if grid.numel() != A.shape[axis] or grid.numel() < 2:
+                raise ValueError("MCMCLOITSND proposal requires grid axes matching the density")
+
+        cell_probs = self._cell_probabilities(A)
+        marginals = self._cell_marginals(cell_probs)
+        indices, _ = self._draw_from_product_marginals(marginals, n_events)
+        return self._indices_to_coordinates(indices, grid_list)
+
     def sample(self, A, grid_list, n_events):
         device, dtype = A.device, A.dtype
         grid_list = [grid.to(device=device, dtype=dtype) for grid in grid_list]
@@ -158,13 +187,5 @@ class MCMCLOITSND(StatefulModule):
             proposed = proposed + n_events
             accepted = accepted + accept.to(dtype).sum()
 
-        coords = []
-        for dim, grid in enumerate(grid_list):
-            idx = current[:, dim]
-            lo = grid[idx]
-            hi = grid[idx + 1]
-            u = torch.rand(n_events, device=device, dtype=dtype)
-            coords.append(lo + u * (hi - lo))
-
         rate = (accepted / proposed.clamp_min(1)).detach().cpu().item()
-        return torch.stack(coords, dim=-1), rate
+        return self._indices_to_coordinates(current, grid_list), rate
